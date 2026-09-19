@@ -13,13 +13,20 @@ requirements and the recorded architecture decisions.
 Python >= 3.13, managed with `uv`.
 
 ```bash
-uv sync
-uv run gcp-explorer --help
+uv sync                                  # includes the dev group (pytest, ruff)
+uv run pytest                            # CAI client is faked; no network or creds needed
+uv run ruff check . && uv run ruff format .
 uv run gcp-explorer list-resources projects/my-project bucket
 uv run gcp-explorer serve                # FastAPI on http://127.0.0.1:8000 (docs at /docs)
 ```
 
-There are no tests, linter config, or CI in the repo yet — they are Phase 1 work.
+No CI yet — that is Phase 6.
+
+`scripts/` holds `gcloud` equivalents of each capability plus `compare-resources.sh`, which
+diffs the two and exits non-zero on disagreement. Unit tests use a fake client, so they cannot
+catch a *wrong CAI query* — only the differential check can. **Every new capability should ship
+with a `gcloud` equivalent there**, especially from Phase 2 on, where filters compile into CAI
+query syntax.
 
 Packaging note: the code lives in `app/`, which does not match the project name
 `gcp-resource-browser`, so `pyproject.toml` declares
@@ -34,17 +41,22 @@ the user runs `gcloud auth application-default login` first. This is a deliberat
 
 ## Architecture
 
-Everything currently lives in `app/main.py`, which hosts three layers in one module:
-
-1. `search_cai_resources(scope, asset_type, query)` — the only code that talks to GCP. It calls
-   Cloud Asset Inventory's `search_all_resources` and flattens each hit to a plain dict
-   (`name`, `project`, `location`, `state`).
-2. FastAPI app (`app`) — thin HTTP wrapper over that function.
-3. Typer CLI (`cli`) — thin terminal wrapper, rendering results as a `rich` table. `cli.serve`
-   starts uvicorn against the same FastAPI app, so CLI and API are one process/one deployable.
+- `app/core.py` — the only module that talks to GCP. `search_resources` wraps CAI's
+  `search_all_resources`, flattens hits into Pydantic models, and translates
+  `google.api_core` exceptions into the domain errors declared there.
+- `app/models.py` — `Resource`, `ResourceList`, `ErrorResponse`.
+- `app/api.py` — FastAPI. `GET /v1/resources?scope=&type=&q=&limit=`.
+- `app/cli.py` — Typer + `rich`. `serve` runs uvicorn against the same FastAPI app, so CLI and
+  API are one process and one deployable.
+- `app/main.py` — thin entry shim for `python -m app.main`.
 
 Both wrappers are intentionally dumb: any new capability (filtering, aggregation, pagination)
-belongs in the shared core function so CLI and API stay in sync.
+belongs in the core so CLI and API stay in sync. Errors follow the same rule — the core raises
+a domain error, and each surface maps it to a status code (`app.api._STATUS_BY_ERROR`) or an
+exit code (`app.cli._EXIT_BY_ERROR`). Adding an error means adding it in all three places.
+
+The API takes scope as a query param rather than a path segment because CAI scopes contain a
+slash (`projects/x`), and because Phase 2's filters are all naturally query params.
 
 ### Cloud Asset Inventory is the data engine
 
@@ -67,10 +79,10 @@ cross-project search; aggregated endpoints. **Check `docs/DELIVERY_PLAN.md` befo
 missing feature is out of scope** — it phases this work and records the sequencing rationale. Keep its checkboxes
 current as phases land, and keep the status note near the top of `README.md` in step.
 
-Other things a change is likely to touch: the API is project-scoped while the CLI accepts any
-scope; invalid input returns HTTP 200 with an `{"error": ...}` body rather than a 400;
-`pydantic` is a declared dependency but unused; `AssetServiceClient()` is constructed on every
-call instead of being reused.
+Results are capped (`DEFAULT_LIMIT`, 1000) so an org-wide search cannot run away. When the cap
+bites, both surfaces say so — `truncated` in the API body, a warning line in the CLI. Keep that
+property: a silently shortened list misrepresents the estate, which is the one thing this tool
+exists to report accurately.
 
 **Do not convert the code to `async` without a measured reason.** Starlette already runs plain
 `def` endpoints in a threadpool, so the existing sync handler is non-blocking and concurrent

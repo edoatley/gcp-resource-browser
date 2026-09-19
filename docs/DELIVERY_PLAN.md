@@ -28,29 +28,51 @@ dependency but unused; no tests.
 
 ---
 
-## Phase 1 — Foundation: structure, types, correctness ☐
+## Phase 1 — Foundation: structure, types, correctness ☑
 
-**Goal:** make the codebase safe to extend before adding features to it. No new user-facing
-capability beyond correct error codes.
+**Goal:** make the codebase safe to extend before adding features to it.
 
-- ☐ Split `app/main.py` into `app/core.py` (CAI access), `app/api.py` (FastAPI), `app/cli.py`
-  (Typer), `app/models.py` (Pydantic). Keep the rule that CLI and API are thin wrappers and all
-  behaviour lives in the core.
-- ☐ Define Pydantic models for a resource row and for the API response envelope. This is what
-  makes the auto-generated OpenAPI schema meaningful rather than `{}` — a prerequisite for the
-  Phase 5 `openapi.yml` objective.
-- ☐ Return proper HTTP status codes: `400` for an unknown resource type, `403` for a CAI
-  permission denial, `404` for an unknown scope. Surface the same failures as non-zero CLI exit
-  codes.
-- ☐ Handle CAI pagination and result caps explicitly rather than relying on implicit iterator
-  exhaustion; expose `page_size` / `--limit`.
-- ☐ Capture more of the CAI payload than the current four fields — at minimum `assetType`,
-  `labels`, `createTime`, `parentFullResourceName`. Phases 2 and 3 filter on these.
-- ☐ Test suite (`pytest`) with the CAI client faked, plus `ruff` for lint/format. Neither
-  exists today.
+- ☑ Split `app/main.py` into `app/core.py` (CAI access), `app/api.py` (FastAPI), `app/cli.py`
+  (Typer), `app/models.py` (Pydantic). `app/main.py` remains a thin entry shim so
+  `python -m app.main` keeps working; the console script points at `app.cli:cli`.
+- ☑ Pydantic models (`Resource`, `ResourceList`, `ErrorResponse`), giving the OpenAPI schema
+  real content — a prerequisite for Phase 5's `openapi.yml` export, and covered by a test that
+  asserts the schema is populated.
+- ☑ Proper status codes: 400 unknown type / malformed scope, 403 permission denied, 404 scope
+  not found, 502 upstream failure. Google exceptions are translated into domain errors in the
+  core, so the CLI and API map the same failures to exit codes and status codes respectively.
+- ☑ Distinct CLI exit codes (2 usage, 3 permission, 4 not-found, 5 upstream).
+- ☑ Explicit pagination and limits: `page_size` upstream, `--limit`/`limit` on total results,
+  defaulting to 1000. Truncation is *reported* (`truncated` in the body, a warning line in the
+  CLI) rather than applied silently.
+- ☑ Capture more of the CAI payload: `full_name`, `asset_type`, `labels`, `create_time`,
+  `parent_full_resource_name`, `state`. `full_name` is the join key Phase 5 needs.
+- ☑ `pytest` suite (34 tests) with the CAI client faked — no network, no credentials — plus
+  `ruff` lint and format, both clean.
+- ☑ API scope generalised to match the CLI: `GET /v1/resources?scope=...&type=...` accepts
+  project, folder, or organization. The `/v1` prefix was pulled forward from Phase 5, since
+  adding it before any consumer exists is free and adding it later is a breaking change.
+- ☑ `scripts/` differential checks against `gcloud` (see below).
+- ☑ CAI client built once and reused (`get_client`, `lru_cache`) instead of per call. Listed
+  under Phase 4, but landed here: the restructure made it a natural change, and dependency
+  injection for the client was needed for the tests regardless.
 
-**Exit criteria:** `pytest` and `ruff check` pass; the API's `/docs` shows real response
-schemas; an invalid resource type returns 400 from the API and a non-zero exit from the CLI.
+### Differential checking against `gcloud`
+
+`scripts/` holds `gcloud` equivalents of what the tool does, plus `compare-resources.sh` which
+diffs the two and exits non-zero on disagreement.
+
+This covers a gap the unit tests structurally cannot: a faked client answers whatever query it
+is given, so it can never reveal that the *query itself* is wrong — filtering client-side that
+should be server-side, or a result set quietly missing rows. Only a second implementation
+against the real API catches that.
+
+**Practice: every new capability ships with a `gcloud` equivalent here.** This matters most from
+Phase 2 on, where `--label` and `--location` compile into CAI query syntax and a subtly wrong
+filter string is easy to miss and hard to notice.
+
+**Deferred from this phase:** the CLI still exposes `list-resources <scope> <type>` with a
+required single type. Making type optional is Phase 3; accepting several is Phase 2.
 
 ---
 
@@ -112,11 +134,9 @@ concurrency the threadpool is already providing.
 
 Do the cheap wins first and measure before reaching for anything structural:
 
-- ☐ **Create the CAI client once and reuse it.** The code constructs `AssetServiceClient()`
-  inside every call, paying channel and TLS setup each time. Build it once at import or in a
-  FastAPI `lifespan` handler. The client is thread-safe, so a single instance serves the
-  threadpool fine. This is almost certainly the largest avoidable latency cost, and it is a
-  handful of lines with no async anywhere.
+- ☑ **Create the CAI client once and reuse it.** Delivered early in Phase 1 (`core.get_client`,
+  `lru_cache`), since the restructure made it natural and the tests needed client injection
+  anyway. Was the largest avoidable latency cost.
 - ☐ **Establish a latency baseline against a real large scope and record it**, so "acceptable
   latency thresholds" becomes a number rather than an adjective. Do this *before* the remaining
   items, so their value is measured rather than assumed.
@@ -148,7 +168,7 @@ fit for other teams to consume.
 - ☐ Machine-readable CLI output (`--output json|csv|table`) so the CLI is scriptable, not just
   human-readable.
 - ☐ Sorting and stable ordering of results.
-- ☐ API versioning prefix (`/v1/...`) before any external consumer depends on the paths.
+- ☑ API versioning prefix (`/v1/...`) — pulled forward and delivered in Phase 1.
 - ☐ Aggregation, as scoped in the section below.
 
 ### Resolving "aggregate data from multiple GCP sources"

@@ -1,0 +1,26 @@
+[project]
+name = "gcp-resource-browser"
+version = "0.1.0"
+description = "GCP Resource Explorer API and CLI"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi",
+    "google-cloud-asset",
+    "pydantic",
+    "rich",
+    "typer",
+    "uvicorn",
+]
+
+[project.scripts]
+# This allows you to run the CLI globally via `uv run gcp-explorer`
+gcp-explorer = "app.main:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# Code lives in app/, which does not match the project name, so name it explicitly.
+packages = ["app"]

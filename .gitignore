@@ -1,0 +1,18 @@
+# Virtual environment
+/.venv/
+
+# Python bytecode / build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+/build/
+/dist/
+
+# Environment / credentials
+.env
+*-credentials.json
+application_default_credentials.json
+
+# IDE / local tooling config
+.idea/
+.mcp.json

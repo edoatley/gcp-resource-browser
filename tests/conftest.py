@@ -90,13 +90,15 @@ class FakeAssetClient:
         self.requests.append(request)
         if self.raises is not None:
             raise self.raises
-        # The project ID -> number lookup is a Project search with a name: query.
-        # Discriminate on both, so a user legitimately searching for Project
-        # assets still gets `results`.
-        is_lookup = list(request.asset_types) == [
-            "cloudresourcemanager.googleapis.com/Project"
-        ] and request.query.startswith('name:"')
-        if is_lookup:
+        # Two internal lookups search Project assets: ID -> number (with a
+        # name: query) and number -> ID (no query). Both are answered from
+        # `projects`. A test that wants to search Project assets as a user
+        # simply leaves `projects` unset, so this falls through to `results`.
+        is_project_lookup = (
+            list(request.asset_types) == ["cloudresourcemanager.googleapis.com/Project"]
+            and self.projects
+        )
+        if is_project_lookup:
             return iter(self.projects)
         self.last_request = request
         return iter(self.results)

@@ -415,3 +415,105 @@ def test_iam_response_carries_the_attached_only_caveat() -> None:
     result = core.search_resources(filters(include_iam=True), client=client)
 
     assert result.iam_note and "Inherited" in result.iam_note
+
+
+def test_project_id_recovered_from_a_nested_resources_own_name() -> None:
+    """A key's parent is a service account, not a project, so the parent path
+    cannot supply the ID -- but the resource's own name carries it."""
+    client = FakeAssetClient(
+        results=[
+            make_search_result(
+                name="//iam.googleapis.com/projects/sudoku-eo-2026/serviceAccounts/1/keys/abc",
+                asset_type="iam.googleapis.com/ServiceAccountKey",
+                parent_full_resource_name=(
+                    "//iam.googleapis.com/projects/sudoku-eo-2026/serviceAccounts/sa@x.com"
+                ),
+            )
+        ]
+    )
+
+    result = core.search_resources(filters(), client=client)
+
+    assert result.resources[0].project_id == "sudoku-eo-2026"
+
+
+def test_number_only_resource_is_resolved_via_one_scope_lookup() -> None:
+    """Some resources carry only the project number anywhere in their payload.
+
+    Left unresolved they appear in a summary as a separate row from the same
+    project's named resources, splitting one project in two.
+    """
+    core._PROJECT_IDS_BY_SCOPE.clear()
+    client = FakeAssetClient(
+        results=[
+            make_search_result(
+                name="//iam.googleapis.com/projects/633423842545/locations/global/pools/p",
+                asset_type="iam.googleapis.com/WorkloadIdentityPool",
+                project="projects/633423842545",
+                parent_full_resource_name=(
+                    "//cloudresourcemanager.googleapis.com/projects/633423842545"
+                ),
+            )
+        ],
+        projects=[make_project_result(project_id="sudoku-eo-2026", number="633423842545")],
+    )
+
+    result = core.search_resources(filters(), client=client)
+
+    assert result.resources[0].project_id == "sudoku-eo-2026"
+    assert result.resources[0].project == "633423842545", "the raw number is preserved"
+
+
+def test_no_scope_lookup_when_every_id_is_already_known(fake_client: FakeAssetClient) -> None:
+    """The extra call must only happen when it is needed."""
+    core._PROJECT_IDS_BY_SCOPE.clear()
+
+    core.search_resources(filters(), client=fake_client)
+
+    assert len(fake_client.requests) == 1
+
+
+def test_scope_lookup_is_one_call_for_any_number_of_projects() -> None:
+    """One call per scope, never one per project -- that would be the fan-out
+    the PRD rejects."""
+    core._PROJECT_IDS_BY_SCOPE.clear()
+    unresolvable = [
+        make_search_result(
+            name=f"//iam.googleapis.com/projects/{600 + i}/locations/global/pools/p{i}",
+            project=f"projects/{600 + i}",
+            parent_full_resource_name="",
+        )
+        for i in range(50)
+    ]
+    client = FakeAssetClient(results=unresolvable, projects=[])
+
+    core.search_resources(filters(), client=client)
+
+    # One resource search plus at most one Project lookup.
+    assert len(client.requests) == 2
+
+
+def test_failed_lookup_degrades_to_the_number() -> None:
+    """A display nicety must never fail a search."""
+    core._PROJECT_IDS_BY_SCOPE.clear()
+
+    class FailsOnLookup(FakeAssetClient):
+        def search_all_resources(self, request):
+            if list(request.asset_types) == ["cloudresourcemanager.googleapis.com/Project"]:
+                raise gcp_exceptions.ServiceUnavailable("nope")
+            return super().search_all_resources(request)
+
+    client = FailsOnLookup(
+        results=[
+            make_search_result(
+                name="//iam.googleapis.com/projects/633423842545/locations/global/pools/p",
+                project="projects/633423842545",
+                parent_full_resource_name="",
+            )
+        ]
+    )
+
+    result = core.search_resources(filters(), client=client)
+
+    assert result.resources[0].project_id is None
+    assert result.resources[0].project == "633423842545"

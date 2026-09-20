@@ -25,7 +25,7 @@ from app.aggregate import ATTACHED_IAM_NOTE, attach_iam, fetch_iam_bindings
 from app.config import load_config
 from app.models import Resource
 from app.noise import NoiseFilter
-from app.params import SORTABLE_FIELDS, SearchFilters
+from app.params import DEFAULT_PAGE_SIZE, SORTABLE_FIELDS, SearchFilters
 from app.query import QueryError, build_query
 
 # Friendly names mapped to CAI asset types, loaded from data rather than
@@ -54,6 +54,11 @@ _PROJECT_PARENT = re.compile(
 
 # Project IDs are never all-digits; project numbers always are.
 _PROJECT_NUMBER = re.compile(r"^\d+$")
+
+# Nested resources (a key under a service account, a record set under a managed
+# zone) have a non-project parent, so the ID cannot come from the parent path --
+# but it usually appears in the resource's own name.
+_PROJECT_IN_NAME = re.compile(r"/projects/(?P<project_id>[a-z][a-z0-9-]{4,28}[a-z0-9])(?:/|$)")
 
 # Project ID -> number. Immutable in GCP, so caching cannot go stale.
 _PROJECT_NUMBERS: dict[str, str] = {}
@@ -217,6 +222,13 @@ def _project_id_of(result: asset_v1.ResourceSearchResult) -> str | None:
         return str(project_id)
 
     match = _PROJECT_PARENT.match(result.parent_full_resource_name or "")
+    if match:
+        return match.group("project_id")
+
+    # Fall back to the resource's own name. Deliberately not the parent's: a
+    # nested resource's parent is another resource, whose path also carries the
+    # project, so either works -- but the resource's own name is always present.
+    match = _PROJECT_IN_NAME.search(result.name or "")
     return match.group("project_id") if match else None
 
 
@@ -236,6 +248,69 @@ def _to_resource(result: asset_v1.ResourceSearchResult) -> Resource:
         create_time=result.create_time if "create_time" in result else None,
         parent_full_resource_name=result.parent_full_resource_name or None,
     )
+
+
+# Project number -> ID, keyed by scope. Built with one CAI call per scope, not
+# one per project: resolving 2000 projects individually is precisely the
+# per-project fan-out the PRD rejects.
+_PROJECT_IDS_BY_SCOPE: dict[str, dict[str, str]] = {}
+
+
+def project_ids_for_scope(
+    scope: str, client: asset_v1.AssetServiceClient
+) -> dict[str, str]:
+    """Map project number -> project ID for every project visible in a scope.
+
+    One call regardless of how many projects the scope holds, because a CAI
+    Project asset carries both: the ID in `additional_attributes.projectId` and
+    the number in `project`.
+    """
+    if scope in _PROJECT_IDS_BY_SCOPE:
+        return _PROJECT_IDS_BY_SCOPE[scope]
+
+    request = asset_v1.SearchAllResourcesRequest(
+        scope=scope,
+        asset_types=["cloudresourcemanager.googleapis.com/Project"],
+        page_size=DEFAULT_PAGE_SIZE,
+    )
+    mapping: dict[str, str] = {}
+    for result in client.search_all_resources(request=request):
+        attributes = dict(result.additional_attributes) if result.additional_attributes else {}
+        project_id = attributes.get("projectId")
+        if project_id and result.project:
+            mapping[result.project.split("/")[-1]] = str(project_id)
+
+    _PROJECT_IDS_BY_SCOPE[scope] = mapping
+    return mapping
+
+
+def _fill_project_ids(
+    resources: list[Resource], scope: str, client: asset_v1.AssetServiceClient
+) -> list[Resource]:
+    """Recover project IDs that were not derivable from a resource's own paths.
+
+    Some resources report only the project number anywhere in their payload
+    (workload identity pools, for one). Left alone they appear in a summary as
+    a separate row from the same project's named resources, splitting one
+    project in two -- which is wrong, not merely ugly.
+    """
+    unresolved = [r for r in resources if not r.project_id and r.project]
+    if not unresolved:
+        return resources
+
+    try:
+        mapping = project_ids_for_scope(scope, client)
+    except gcp_exceptions.GoogleAPICallError:
+        # Best-effort enrichment: a display nicety must never fail a search.
+        # The number is still shown, which is accurate if less readable.
+        return resources
+
+    return [
+        r.model_copy(update={"project_id": mapping[r.project]})
+        if (not r.project_id and r.project in mapping)
+        else r
+        for r in resources
+    ]
 
 
 def resolve_project_filter(
@@ -396,6 +471,8 @@ def search_resources(
             results.append(resource)
     except gcp_exceptions.GoogleAPICallError as exc:
         raise _translate(exc, filters.scope) from exc
+
+    results = _fill_project_ids(results, filters.scope, client)
 
     iam_note = None
     if filters.include_iam:

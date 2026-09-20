@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 
 from app import core
 from app.models import ErrorResponse, ResourceList
+from app.params import DEFAULT_LIMIT, Help, SearchFilters
 
 # Precomputed for the OpenAPI descriptions below, which are evaluated at import.
 _TYPE_NAMES = ", ".join(sorted(core.ASSET_TYPES))
@@ -63,48 +64,33 @@ def handle_explorer_error(request: Request, exc: core.ResourceExplorerError) -> 
     summary="Search resources in a scope",
 )
 def search_resources(
-    scope: str = Query(
-        description="CAI scope: organizations/<id>, folders/<id>, or projects/<id>",
-        examples=["projects/my-project"],
-    ),
+    scope: str = Query(description=Help.SCOPE, examples=["projects/my-project"]),
     type: list[str] = Query(
-        description=(
-            f"Resource type, repeatable. A friendly name ({_TYPE_NAMES}), "
-            "a raw CAI asset type, or an RE2 pattern."
-        ),
+        # The surface adds what only it can say: the concrete name list, which
+        # belongs in the schema but would bloat `--help`.
+        description=f"{Help.TYPE} Friendly names: {_TYPE_NAMES}.",
         examples=[["bucket"]],
     ),
-    q: str = Query(default="", description="Free-text term matched across searchable fields"),
-    label: list[str] = Query(
-        default_factory=list,
-        description="Label filter, repeatable: `key=value`, or `key` for any value",
-        examples=[["env=prod"]],
-    ),
+    q: str = Query(default="", description=Help.TERM),
+    label: list[str] = Query(default_factory=list, description=Help.LABEL, examples=[["env=prod"]]),
     location: list[str] = Query(
-        default_factory=list,
-        description="Location filter, repeatable; several are ORed. Supports `*` wildcards.",
-        examples=[["europe-west2"]],
+        default_factory=list, description=Help.LOCATION, examples=[["europe-west2"]]
     ),
-    project: list[str] = Query(
-        default_factory=list,
-        description="Project filter, repeatable; several are ORed",
-    ),
-    raw_query: str = Query(
-        default="", description="Raw CAI query syntax, ANDed with the other filters"
-    ),
-    limit: int = Query(
-        default=core.DEFAULT_LIMIT, ge=1, le=10_000, description="Maximum resources to return"
-    ),
+    project: list[str] = Query(default_factory=list, description=Help.PROJECT),
+    raw_query: str = Query(default="", description=Help.RAW_QUERY),
+    limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=10_000, description=Help.LIMIT),
 ) -> ResourceList:
     result = core.search_resources(
-        scope=scope,
-        resource_types=type,
-        free_text=q,
-        labels=label,
-        locations=location,
-        projects=project,
-        raw_query=raw_query,
-        limit=limit,
+        SearchFilters(
+            scope=scope,
+            resource_types=type,
+            free_text=q,
+            labels=label,
+            locations=location,
+            projects=project,
+            raw_query=raw_query,
+            limit=limit,
+        )
     )
     return ResourceList(
         scope=scope,

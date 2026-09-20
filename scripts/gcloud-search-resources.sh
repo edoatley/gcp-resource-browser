@@ -35,31 +35,16 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$SCOPE" && ${#TYPES[@]} -gt 0 ]] || usage
 
-# Friendly name -> CAI asset type. Kept in step with app/core.py ASSET_TYPES.
+# Friendly name -> CAI asset type, read from the same file app/core.py loads,
+# so the mapping cannot drift between the tool and this check. Anything absent
+# is passed through as a raw CAI type or RE2 pattern.
+TYPES_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/app/asset_types.json"
+[[ -f "$TYPES_FILE" ]] || { echo "Missing $TYPES_FILE" >&2; exit 1; }
+
 resolve_type() {
-  case "$1" in
-    bucket)         echo "storage.googleapis.com/Bucket" ;;
-    cloudrun)       echo "run.googleapis.com/Service" ;;
-    vm)             echo "compute.googleapis.com/Instance" ;;
-    disk)           echo "compute.googleapis.com/Disk" ;;
-    network)        echo "compute.googleapis.com/Network" ;;
-    subnet)         echo "compute.googleapis.com/Subnetwork" ;;
-    firewall)       echo "compute.googleapis.com/Firewall" ;;
-    address)        echo "compute.googleapis.com/Address" ;;
-    forwardingrule) echo "compute.googleapis.com/ForwardingRule" ;;
-    gke)            echo "container.googleapis.com/Cluster" ;;
-    function)       echo "cloudfunctions.googleapis.com/CloudFunction" ;;
-    sql)            echo "sqladmin.googleapis.com/Instance" ;;
-    spanner)        echo "spanner.googleapis.com/Instance" ;;
-    topic)          echo "pubsub.googleapis.com/Topic" ;;
-    subscription)   echo "pubsub.googleapis.com/Subscription" ;;
-    dataset)        echo "bigquery.googleapis.com/Dataset" ;;
-    table)          echo "bigquery.googleapis.com/Table" ;;
-    secret)         echo "secretmanager.googleapis.com/Secret" ;;
-    serviceaccount) echo "iam.googleapis.com/ServiceAccount" ;;
-    project)        echo "cloudresourcemanager.googleapis.com/Project" ;;
-    *)              echo "$1" ;;   # raw CAI type or RE2 pattern
-  esac
+  local resolved
+  resolved="$(jq -r --arg n "$1" '.types[$n] // empty' "$TYPES_FILE")"
+  echo "${resolved:-$1}"
 }
 
 asset_types=""

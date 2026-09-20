@@ -13,6 +13,7 @@ from rich.console import Console
 from rich.table import Table
 
 from app import core
+from app.params import DEFAULT_LIMIT, Help, SearchFilters
 
 cli = typer.Typer(help="GCP Resource Explorer CLI", no_args_is_help=True)
 console = Console()
@@ -37,6 +38,15 @@ _EXIT_BY_ERROR: dict[type[core.ResourceExplorerError], int] = {
 def _fail(exc: core.ResourceExplorerError) -> typer.Exit:
     err_console.print(f"[red]Error:[/red] {exc}")
     return typer.Exit(code=_EXIT_BY_ERROR.get(type(exc), 1))
+
+
+def _warn_if_truncated(result: core.SearchResult, limit: int) -> None:
+    """A cap that silently shortened the list would misreport the estate."""
+    if result.truncated:
+        console.print(
+            f"[yellow]Showing the first {limit} results; more exist. "
+            f"Use --limit to raise the cap.[/yellow]"
+        )
 
 
 def _render(result: core.SearchResult, scope: str, title: str, show_query: bool) -> None:
@@ -73,29 +83,16 @@ def _render(result: core.SearchResult, scope: str, title: str, show_query: bool)
 
 @cli.command()
 def search(
-    scope: str = typer.Argument(
-        ..., help="Scope: organizations/<id>, folders/<id>, or projects/<id>"
-    ),
-    term: str = typer.Argument("", help="Free-text term, matched across all searchable fields"),
-    resource_type: list[str] = typer.Option(
-        ...,
-        "--type",
-        "-t",
-        help="Resource type; repeat for several. Friendly name or raw CAI type.",
-    ),
-    label: list[str] = typer.Option(
-        [], "--label", "-l", help="Label filter: key=value, or key for any value. Repeatable."
-    ),
-    location: list[str] = typer.Option(
-        [], "--location", help="Location filter; repeat to OR. Supports * wildcards."
-    ),
-    project: list[str] = typer.Option([], "--project", help="Project filter; repeat to OR."),
-    raw_query: str = typer.Option(
-        "", "--raw-query", help="Raw CAI query syntax, ANDed with the other filters"
-    ),
-    limit: int = typer.Option(
-        core.DEFAULT_LIMIT, "--limit", "-n", min=1, help="Maximum resources to return"
-    ),
+    scope: str = typer.Argument(..., help=Help.SCOPE),
+    term: str = typer.Argument("", help=Help.TERM),
+    resource_type: list[str] = typer.Option(..., "--type", "-t", help=Help.TYPE),
+    label: list[str] = typer.Option([], "--label", "-l", help=Help.LABEL),
+    location: list[str] = typer.Option([], "--location", help=Help.LOCATION),
+    project: list[str] = typer.Option([], "--project", help=Help.PROJECT),
+    raw_query: str = typer.Option("", "--raw-query", help=Help.RAW_QUERY),
+    limit: int = typer.Option(DEFAULT_LIMIT, "--limit", "-n", min=1, help=Help.LIMIT),
+    # CLI-only: the API always returns `query` in the body, where it costs
+    # nothing. On a terminal it is noise unless asked for.
     show_query: bool = typer.Option(
         False, "--show-query", help="Print the CAI query the filters compiled to"
     ),
@@ -104,43 +101,41 @@ def search(
     try:
         with console.status(f"Searching {scope}..."):
             result = core.search_resources(
-                scope=scope,
-                resource_types=resource_type,
-                free_text=term,
-                labels=label,
-                locations=location,
-                projects=project,
-                raw_query=raw_query,
-                limit=limit,
+                SearchFilters(
+                    scope=scope,
+                    resource_types=resource_type,
+                    free_text=term,
+                    labels=label,
+                    locations=location,
+                    projects=project,
+                    raw_query=raw_query,
+                    limit=limit,
+                )
             )
     except core.ResourceExplorerError as exc:
         raise _fail(exc) from exc
 
     _render(result, scope, title=f"GCP resources in {scope}", show_query=show_query)
-
-    if result.truncated:
-        console.print(
-            f"[yellow]Showing the first {limit} results; more exist. "
-            f"Use --limit to raise the cap.[/yellow]"
-        )
+    _warn_if_truncated(result, limit)
 
 
 @cli.command("list-resources")
 def list_resources(
-    scope: str = typer.Argument(
-        ..., help="Scope: organizations/<id>, folders/<id>, or projects/<id>"
-    ),
+    scope: str = typer.Argument(..., help=Help.SCOPE),
     resource_type: str = typer.Argument(..., help="Resource type, e.g. 'bucket'"),
-    query: str = typer.Option("", "--query", "-q", help="Free-text CAI query filter"),
-    limit: int = typer.Option(
-        core.DEFAULT_LIMIT, "--limit", "-n", min=1, help="Maximum resources to return"
-    ),
+    query: str = typer.Option("", "--query", "-q", help=Help.TERM),
+    limit: int = typer.Option(DEFAULT_LIMIT, "--limit", "-n", min=1, help=Help.LIMIT),
 ) -> None:
     """Query one resource type and print a table (single-type form of `search`)."""
     try:
         with console.status(f"Searching for {resource_type}s in {scope}..."):
             result = core.search_resources(
-                scope=scope, resource_types=[resource_type], free_text=query, limit=limit
+                SearchFilters(
+                    scope=scope,
+                    resource_types=[resource_type],
+                    free_text=query,
+                    limit=limit,
+                )
             )
     except core.ResourceExplorerError as exc:
         raise _fail(exc) from exc
@@ -151,12 +146,7 @@ def list_resources(
         title=f"GCP {resource_type.capitalize()}s in {scope}",
         show_query=False,
     )
-
-    if result.truncated:
-        console.print(
-            f"[yellow]Showing the first {limit} results; more exist. "
-            f"Use --limit to raise the cap.[/yellow]"
-        )
+    _warn_if_truncated(result, limit)
 
 
 @cli.command("types")

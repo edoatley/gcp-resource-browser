@@ -45,6 +45,10 @@ the user runs `gcloud auth application-default login` first. This is a deliberat
   `search_all_resources`, flattens hits into Pydantic models, and translates
   `google.api_core` exceptions into the domain errors declared there.
 - `app/query.py` — compiles filters into CAI query syntax. See the warning below.
+- `app/params.py` — `SearchFilters` (what a search takes) and `Help` (how each filter is
+  described). Both surfaces read from here.
+- `app/asset_types.json` — the friendly-name mapping, loaded by `core.py` and read with `jq`
+  by `scripts/gcloud-search-resources.sh`.
 - `app/models.py` — `Resource`, `ResourceList`, `ErrorResponse`.
 - `app/api.py` — FastAPI. `GET /v1/resources` (repeatable `type`, `label`, `location`,
   `project`), `GET /v1/types`.
@@ -56,6 +60,17 @@ Both wrappers are intentionally dumb: any new capability (filtering, aggregation
 belongs in the core so CLI and API stay in sync. Errors follow the same rule — the core raises
 a domain error, and each surface maps it to a status code (`app.api._STATUS_BY_ERROR`) or an
 exit code (`app.cli._EXIT_BY_ERROR`). Adding an error means adding it in all three places.
+
+**Adding a filter:** add it to `Help` and `SearchFilters` in `app/params.py`, handle it in
+`build_query`, then reference `Help.X` from both surfaces and pass it through the
+`SearchFilters(...)` each builds. Do not retype the help text — `tests/test_params.py` asserts
+each shared string appears verbatim in both surfaces, and will fail if you do.
+
+The two signatures stay separate on purpose. FastAPI and Typer both build their artifacts by
+introspecting the function signature, so collapsing them to `**kwargs` would destroy the
+OpenAPI schema and the generated CLI help. Share the *knowledge* (help text, filter set), not
+the declarations. Surface-specific detail — short flags, OpenAPI `examples`, `ge=1` vs `min=1`,
+`--show-query` — stays local, and either surface may append to a shared `Help` string.
 
 The API takes scope as a query param rather than a path segment because CAI scopes contain a
 slash (`projects/x`), and because Phase 2's filters are all naturally query params.

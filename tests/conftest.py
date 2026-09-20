@@ -10,6 +10,13 @@ import pytest
 from google.api_core import exceptions as gcp_exceptions
 from google.cloud import asset_v1
 
+from app.params import SearchFilters
+
+
+def filters(scope: str = "projects/p", types: tuple[str, ...] = ("bucket",), **kwargs):
+    """Build SearchFilters with defaults, so a test names only what it varies."""
+    return SearchFilters(scope=scope, resource_types=list(types), **kwargs)
+
 
 def make_search_result(
     name: str = "//storage.googleapis.com/buckets/example",

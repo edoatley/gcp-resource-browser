@@ -11,43 +11,33 @@ Discovery is always a single scope-wide CAI search. See docs/PRD.md.
 from __future__ import annotations
 
 import itertools
+import json
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 
 from google.api_core import exceptions as gcp_exceptions
 from google.cloud import asset_v1
 
 from app.models import Resource
+from app.params import SearchFilters
 from app.query import QueryError, build_query
 
-# Friendly names mapped to CAI asset types. One entry lights up both the CLI
-# and the API, since both resolve through this dict. Not a hard limit: any raw
-# CAI asset type (or RE2 pattern) is accepted as a pass-through, so an absent
-# entry is a convenience gap rather than a blocker.
-ASSET_TYPES: dict[str, str] = {
-    "bucket": "storage.googleapis.com/Bucket",
-    "cloudrun": "run.googleapis.com/Service",
-    "vm": "compute.googleapis.com/Instance",
-    "disk": "compute.googleapis.com/Disk",
-    "network": "compute.googleapis.com/Network",
-    "subnet": "compute.googleapis.com/Subnetwork",
-    "firewall": "compute.googleapis.com/Firewall",
-    "address": "compute.googleapis.com/Address",
-    "forwardingrule": "compute.googleapis.com/ForwardingRule",
-    "gke": "container.googleapis.com/Cluster",
-    "function": "cloudfunctions.googleapis.com/CloudFunction",
-    "sql": "sqladmin.googleapis.com/Instance",
-    "spanner": "spanner.googleapis.com/Instance",
-    "topic": "pubsub.googleapis.com/Topic",
-    "subscription": "pubsub.googleapis.com/Subscription",
-    "dataset": "bigquery.googleapis.com/Dataset",
-    "table": "bigquery.googleapis.com/Table",
-    "secret": "secretmanager.googleapis.com/Secret",
-    "serviceaccount": "iam.googleapis.com/ServiceAccount",
-    "project": "cloudresourcemanager.googleapis.com/Project",
-}
+# Friendly names mapped to CAI asset types, loaded from data rather than
+# written as a literal so scripts/ can read the same file with jq. The mapping
+# previously existed twice -- here and in bash -- which is exactly the kind of
+# duplication that drifts silently.
+ASSET_TYPES_FILE = Path(__file__).with_name("asset_types.json")
+
+
+def _load_asset_types() -> dict[str, str]:
+    with ASSET_TYPES_FILE.open() as handle:
+        return dict(json.load(handle)["types"])
+
+
+ASSET_TYPES: dict[str, str] = _load_asset_types()
 
 # A raw CAI asset type looks like "storage.googleapis.com/Bucket". Anything
 # containing a dot or a slash is treated as a raw type or RE2 pattern and
@@ -56,15 +46,6 @@ _RAW_ASSET_TYPE = re.compile(r"[./]")
 
 # CAI accepts an organization, folder, or project as a search scope.
 SCOPE_PATTERN = re.compile(r"^(organizations|folders|projects)/[a-zA-Z0-9][a-zA-Z0-9\-_.]*$")
-
-# Results per upstream page. CAI caps this at 500 server-side regardless of
-# what is asked, so this sits at the ceiling. Tuning knob, not a cap on totals.
-DEFAULT_PAGE_SIZE = 500
-
-# Default ceiling on total results, so an unqualified org-wide search cannot
-# stream an unbounded set into memory. Callers can raise or remove it; when it
-# bites, the result is flagged `truncated` rather than silently shortened.
-DEFAULT_LIMIT = 1000
 
 
 class ResourceExplorerError(Exception):
@@ -179,18 +160,10 @@ def _to_resource(result: asset_v1.ResourceSearchResult) -> Resource:
 
 
 def search_resources(
-    scope: str,
-    resource_types: Sequence[str],
-    free_text: str = "",
-    labels: Sequence[str] = (),
-    locations: Sequence[str] = (),
-    projects: Sequence[str] = (),
-    raw_query: str = "",
-    limit: int | None = DEFAULT_LIMIT,
-    page_size: int = DEFAULT_PAGE_SIZE,
+    filters: SearchFilters,
     client: asset_v1.AssetServiceClient | None = None,
 ) -> SearchResult:
-    """Search a scope for resources of one or more types.
+    """Search a scope for resources matching `filters`.
 
     Filters are compiled into a CAI query and evaluated upstream. Returns the
     resources found, whether `limit` truncated them, and the query that was
@@ -199,16 +172,16 @@ def search_resources(
 
     Relies on locally authenticated ADC (`gcloud auth application-default login`).
     """
-    validate_scope(scope)
-    asset_types = resolve_asset_types(resource_types)
+    validate_scope(filters.scope)
+    asset_types = resolve_asset_types(filters.resource_types)
 
     try:
         query = build_query(
-            free_text=free_text,
-            labels=labels,
-            locations=locations,
-            projects=projects,
-            raw=raw_query,
+            free_text=filters.free_text,
+            labels=filters.labels,
+            locations=filters.locations,
+            projects=filters.projects,
+            raw=filters.raw_query,
         )
     except QueryError as exc:
         raise InvalidFilterError(str(exc)) from exc
@@ -216,12 +189,13 @@ def search_resources(
     client = client or get_client()
 
     request = asset_v1.SearchAllResourcesRequest(
-        scope=scope,
+        scope=filters.scope,
         asset_types=asset_types,
         query=query,
-        page_size=page_size,
+        page_size=filters.page_size,
     )
 
+    limit = filters.limit
     try:
         pager = client.search_all_resources(request=request)
         # Take one more than asked for, so truncation is detected without
@@ -230,11 +204,11 @@ def search_resources(
         results = [_to_resource(item) for item in window]
     except gcp_exceptions.PermissionDenied as exc:
         raise ScopeAccessDenied(
-            f"Permission denied on {scope}. The cloudasset.assets.searchAllResources "
+            f"Permission denied on {filters.scope}. The cloudasset.assets.searchAllResources "
             "permission (roles/cloudasset.viewer) is required on that scope."
         ) from exc
     except gcp_exceptions.NotFound as exc:
-        raise ScopeNotFound(f"Scope {scope} was not found.") from exc
+        raise ScopeNotFound(f"Scope {filters.scope} was not found.") from exc
     except gcp_exceptions.InvalidArgument as exc:
         # CAI also returns this for an asset-type pattern matching nothing.
         raise InvalidFilterError(

@@ -135,6 +135,52 @@ noise filter returns something unusable, so the two ship together.
 
 ---
 
+## Interlude — One authoritative source per fact ☑
+
+Not a PRD phase; a consolidation done after Phase 2, when duplication between the two surfaces
+had produced its first real drift.
+
+**The drift that prompted it:** the API documented RE2 patterns for `type` while the CLI's
+`--type` help did not, though both supported them. Both were written in the same session, an
+hour apart.
+
+**What was unified, and what deliberately was not.** The distinction applied throughout: DRY is
+about *knowledge* having one authoritative home, not about text never repeating.
+
+- ☑ `app/params.py` holds `Help` (the prose describing each filter) and `SearchFilters` (the
+  set of inputs a search takes). Both surfaces build a `SearchFilters` and hand it to the core,
+  so adding a filter changes one signature rather than every forwarding call.
+- ☑ `app/asset_types.json` holds the friendly-name mapping, loaded by `app/core.py` and read
+  with `jq` by `scripts/gcloud-search-resources.sh`. It previously existed twice, in two
+  languages — 20 entries each.
+- ☑ Tests that make drift a failure: `tests/test_params.py` asserts each shared `Help` string
+  appears verbatim in both surfaces, and `tests/test_asset_types.py` asserts bash and Python
+  resolve identically and that the bash case statement has not crept back.
+- ✗ **Signatures were not unified.** FastAPI and Typer both work by introspecting the function
+  signature to build their artifacts. Collapsing them to `**kwargs` would destroy the
+  auto-generated OpenAPI schema the PRD asks for, and the CLI's generated help with it. The
+  declarations look alike but produce different things.
+- ✗ **Surface-specific detail stays local.** Short flags (`-t`), OpenAPI `examples`, validator
+  spellings (`ge=1` vs `min=1`), and `--show-query` (CLI-only — the API returns `query` in the
+  body, where it costs nothing) belong to one surface. Each may *append* to a shared `Help`
+  string where it has more to say: the API appends the full type list, which the schema can
+  afford and `--help` cannot.
+
+**Why the asset-type mapping is data but not yet configuration.** Two separable questions.
+Making it *data* pays for itself now, because bash needs to read it. Making it *user-overridable
+configuration* is a different feature — it needs discovery paths, merge-or-replace semantics,
+and validation of untrusted input — and belongs with Phase 3's noise ruleset, which has the
+same requirements. Building one override mechanism for both is better than two.
+
+**One cost, accepted knowingly:** the differential check is slightly weaker. When the mapping
+lived in both languages, a typo in one showed up as a mismatch. Now both read the same file, so
+a wrong alias makes both sides search the wrong type and agree. That is a fair trade — the
+check exists to validate *query compilation*, not the alias table, and silent drift between two
+copies was the more likely failure. `tests/test_asset_types.py` covers the shape of the table
+instead.
+
+---
+
 ## Phase 3 — Query-all-by-default with noise reduction ☐
 
 **Goal:** the PRD's resolved decision that the tool queries *all* resource types by default and
@@ -149,7 +195,10 @@ hides low-value noise unless asked.
 - ☐ `--show-all` (CLI) and `?show_all=true` (API) to bypass it, exactly as named in the PRD.
 - ☐ Report what was suppressed (`"142 results, 38 hidden — use --show-all"`) so the filter is
   never silently misleading.
-- ☐ Allow the ruleset to be overridden from a config file for site-specific noise.
+- ☐ Allow the ruleset to be overridden from a config file for site-specific noise. Design the
+  override mechanism once and apply it to `app/asset_types.json` too — both need discovery
+  paths, merge-or-replace semantics, and validation. See the Interlude above for why the
+  asset-type mapping was made data without yet being made configurable.
 
 **Exit criteria:** a bare `gcp-explorer search organizations/123` returns a readable result set;
 `--show-all` returns the unfiltered set; the difference between them is explained in the output.

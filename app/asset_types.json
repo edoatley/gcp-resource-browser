@@ -1,0 +1,32 @@
+{
+  "_comment": [
+    "Friendly resource-type names mapped to Cloud Asset Inventory asset types.",
+    "The authoritative copy: app/core.py loads this, and scripts/ reads it with jq,",
+    "so the mapping cannot drift between the tool and its differential checks.",
+    "Not a limit on what can be searched -- raw CAI asset types and RE2 patterns are",
+    "accepted anywhere a friendly name is, so a missing entry is a convenience gap.",
+    "Site-specific overrides are deliberately not supported yet; see Phase 3."
+  ],
+  "types": {
+    "address": "compute.googleapis.com/Address",
+    "bucket": "storage.googleapis.com/Bucket",
+    "cloudrun": "run.googleapis.com/Service",
+    "dataset": "bigquery.googleapis.com/Dataset",
+    "disk": "compute.googleapis.com/Disk",
+    "firewall": "compute.googleapis.com/Firewall",
+    "forwardingrule": "compute.googleapis.com/ForwardingRule",
+    "function": "cloudfunctions.googleapis.com/CloudFunction",
+    "gke": "container.googleapis.com/Cluster",
+    "network": "compute.googleapis.com/Network",
+    "project": "cloudresourcemanager.googleapis.com/Project",
+    "secret": "secretmanager.googleapis.com/Secret",
+    "serviceaccount": "iam.googleapis.com/ServiceAccount",
+    "spanner": "spanner.googleapis.com/Instance",
+    "sql": "sqladmin.googleapis.com/Instance",
+    "subnet": "compute.googleapis.com/Subnetwork",
+    "subscription": "pubsub.googleapis.com/Subscription",
+    "table": "bigquery.googleapis.com/Table",
+    "topic": "pubsub.googleapis.com/Topic",
+    "vm": "compute.googleapis.com/Instance"
+  }
+}

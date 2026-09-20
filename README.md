@@ -152,7 +152,10 @@ Three layers:
 2. **CLI** (`app/cli.py`) — renders a `rich` table, maps domain errors to exit codes.
 3. **API** (`app/api.py`) — returns JSON, maps domain errors to status codes.
 
-`app/models.py` holds the shared Pydantic models; `app/main.py` is a thin entry shim.
+`app/models.py` holds the wire models and `app/params.py` the shared interface definition —
+`SearchFilters` (what a search takes) and `Help` (how each filter is described), so the CLI and
+API cannot describe the same filter differently. `app/asset_types.json` holds the friendly-name
+mapping, read by both the tool and `scripts/`. `app/main.py` is a thin entry shim.
 
 ### Filtering happens server-side
 

@@ -95,8 +95,9 @@ def test_concurrency_is_bounded() -> None:
                 in_flight -= 1
             return iter([])
 
-    search_scopes([f"projects/p{i}" for i in range(40)], base(),
-                  client=SlowClient(), max_concurrency=4)
+    search_scopes(
+        [f"projects/p{i}" for i in range(40)], base(), client=SlowClient(), max_concurrency=4
+    )
 
     assert peak <= 4, f"expected at most 4 concurrent calls, saw {peak}"
 
@@ -105,8 +106,9 @@ def test_concurrency_never_exceeds_the_scope_count() -> None:
     """Spinning up 8 threads for 2 scopes wastes them."""
     client = FakeAssetClient(results=[])
 
-    merged = search_scopes(["projects/a"], base(), client=client,
-                           max_concurrency=DEFAULT_MAX_CONCURRENCY)
+    merged = search_scopes(
+        ["projects/a"], base(), client=client, max_concurrency=DEFAULT_MAX_CONCURRENCY
+    )
 
     assert merged.failures == {}
 
@@ -114,9 +116,7 @@ def test_concurrency_never_exceeds_the_scope_count() -> None:
 def test_suppression_counts_are_summed_across_scopes() -> None:
     client = FakeAssetClient(
         results=[
-            make_search_result(
-                name="//x/api", asset_type="serviceusage.googleapis.com/Service"
-            )
+            make_search_result(name="//x/api", asset_type="serviceusage.googleapis.com/Service")
         ]
     )
 

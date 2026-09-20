@@ -231,9 +231,10 @@ straight through would return an empty result rather than an error.
 Results are capped at 1000 by default so an org-wide search cannot run away; when the cap
 bites, the CLI says so rather than silently returning a short list. Raise it with `--limit`.
 
-**Exit codes:** `0` success · `2` bad usage (unknown type, malformed scope or filter) · `3`
-permission denied · `4` scope not found · `5` upstream CAI failure · `6` Cloud Asset API not
-enabled on the billing project.
+**Exit codes:** `0` success · `2` bad usage (unknown type, malformed scope, bad filter or sort)
+· `3` permission denied · `4` scope not found · `5` upstream CAI failure · `6` Cloud Asset API
+not enabled on the billing project · `7` partial — some scopes answered, some failed (only
+possible with `--also-scope`).
 
 ### HTTP API
 
@@ -246,7 +247,8 @@ uv run gcp-explorer serve      # http://127.0.0.1:8000
 | `GET /v1/resources?scope=&type=&q=&label=&location=&project=&limit=` | Search a scope; `type`, `label`, `location` and `project` are repeatable |
 | `GET /v1/summary?scope=` | Counts by type, project and location, in one payload |
 | `GET /v1/types` | Friendly type names mapped to CAI asset types |
-| `GET /healthz` | Liveness probe |
+| `GET /healthz` | Liveness probe; does no I/O |
+| `GET /readyz` | Readiness probe; 503 when ADC cannot be resolved |
 | `GET /docs` | Swagger UI (auto-generated) |
 | `GET /openapi.json` | OpenAPI schema |
 
@@ -392,7 +394,7 @@ and the tool picks it up unchanged, which is what the ADC decision was for.
 
 ```bash
 uv sync                  # includes the dev group (pytest, ruff)
-uv run pytest            # 34 tests, no network or credentials needed
+uv run pytest            # no network or credentials needed
 uv run ruff check .
 uv run ruff format .
 uv run gcp-explorer --help

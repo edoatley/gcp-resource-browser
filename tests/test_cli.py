@@ -299,9 +299,7 @@ def test_json_output_is_clean_on_stdout(use_fake) -> None:
     """A pipeline reading stdout must get valid JSON and nothing else."""
     import json
 
-    use_fake(
-        FakeAssetClient(results=[make_search_result(name=f"//x/{i}") for i in range(25)])
-    )
+    use_fake(FakeAssetClient(results=[make_search_result(name=f"//x/{i}") for i in range(25)]))
 
     result = runner.invoke(
         cli_module.cli, ["search", "projects/p", "--type", "bucket", "-o", "json", "-n", "5"]
@@ -317,9 +315,7 @@ def test_warnings_go_to_stderr_not_into_the_payload(use_fake) -> None:
     use_fake(
         FakeAssetClient(
             results=[
-                make_search_result(
-                    name="//x/a", asset_type="serviceusage.googleapis.com/Service"
-                ),
+                make_search_result(name="//x/a", asset_type="serviceusage.googleapis.com/Service"),
                 make_search_result(name="//x/b"),
             ]
         )
@@ -346,9 +342,7 @@ def test_csv_output_parses(use_fake) -> None:
 
 
 def test_summary_command_reports_totals(use_fake) -> None:
-    use_fake(
-        FakeAssetClient(results=[make_search_result(name=f"//x/{i}") for i in range(4)])
-    )
+    use_fake(FakeAssetClient(results=[make_search_result(name=f"//x/{i}") for i in range(4)]))
 
     result = runner.invoke(cli_module.cli, ["summary", "projects/p"])
 

@@ -102,9 +102,7 @@ def load_config() -> Config:
     for path in config_paths():
         if not path.is_file():
             if explicit and str(path) == explicit:
-                raise ConfigError(
-                    f"{CONFIG_ENV_VAR} points at {path}, which does not exist."
-                )
+                raise ConfigError(f"{CONFIG_ENV_VAR} points at {path}, which does not exist.")
             continue
         try:
             raw = json.loads(path.read_text())

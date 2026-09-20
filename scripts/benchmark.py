@@ -59,23 +59,27 @@ def main() -> int:
 
     # Cold: includes client construction, which is paid once per process.
     core.get_client.cache_clear()
-    median, best, result = timed(
-        lambda: core.search_resources(filters(limit=args.limit)), 1
+    median, best, result = timed(lambda: core.search_resources(filters(limit=args.limit)), 1)
+    rows.append(
+        ("Cold (client construction included)", median, best, f"{len(result.resources)} shown")
     )
-    rows.append(("Cold (client construction included)", median, best,
-                 f"{len(result.resources)} shown"))
 
     median, best, result = timed(
         lambda: core.search_resources(filters(limit=args.limit)), args.repeats
     )
-    rows.append(("Warm, all types, noise reduced", median, best,
-                 f"{len(result.resources)} shown, {result.suppressed} hidden"))
+    rows.append(
+        (
+            "Warm, all types, noise reduced",
+            median,
+            best,
+            f"{len(result.resources)} shown, {result.suppressed} hidden",
+        )
+    )
 
     median, best, result = timed(
         lambda: core.search_resources(filters(limit=args.limit, show_all=True)), args.repeats
     )
-    rows.append(("Warm, all types, --show-all", median, best,
-                 f"{len(result.resources)} shown"))
+    rows.append(("Warm, all types, --show-all", median, best, f"{len(result.resources)} shown"))
 
     median, best, result = timed(
         lambda: core.search_resources(
@@ -86,11 +90,8 @@ def main() -> int:
     rows.append(("Single asset type", median, best, f"{len(result.resources)} shown"))
 
     # Does an early stop actually save network, or is it all one page?
-    median, best, result = timed(
-        lambda: core.search_resources(filters(limit=10)), args.repeats
-    )
-    rows.append(("All types, --limit 10", median, best,
-                 f"{len(result.resources)} shown"))
+    median, best, result = timed(lambda: core.search_resources(filters(limit=10)), args.repeats)
+    rows.append(("All types, --limit 10", median, best, f"{len(result.resources)} shown"))
 
     # Streaming: time to the FIRST row, which is the point of it.
     def first_row() -> object:
@@ -100,6 +101,7 @@ def main() -> int:
     rows.append(("Streaming: time to first resource", median, best, "first row only"))
 
     if len(scopes) > 1:
+
         def sequential() -> int:
             total = 0
             for scope in scopes:
@@ -111,15 +113,27 @@ def main() -> int:
             return total
 
         median_seq, _, count = timed(sequential, 1)
-        rows.append((f"Sequential across {len(scopes)} scopes", median_seq, median_seq,
-                     f"{count} resources"))
+        rows.append(
+            (
+                f"Sequential across {len(scopes)} scopes",
+                median_seq,
+                median_seq,
+                f"{count} resources",
+            )
+        )
 
         median_par, best_par, merged = timed(
             lambda: search_scopes(scopes, filters(limit=args.limit)), 1
         )
         speedup = median_seq / median_par if median_par else 0
-        rows.append((f"Concurrent across {len(scopes)} scopes", median_par, best_par,
-                     f"{len(merged.resources)} resources, {speedup:.1f}x"))
+        rows.append(
+            (
+                f"Concurrent across {len(scopes)} scopes",
+                median_par,
+                best_par,
+                f"{len(merged.resources)} resources, {speedup:.1f}x",
+            )
+        )
         if merged.failures:
             print(f"WARNING: {len(merged.failures)} scope(s) failed:", file=sys.stderr)
             for scope, reason in merged.failures.items():

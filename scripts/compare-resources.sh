@@ -11,9 +11,12 @@ set -euo pipefail
 
 [[ $# -gt 0 ]] || {
   cat >&2 <<'USAGE'
-usage: compare-resources.sh --scope SCOPE --type TYPE [--term TEXT] [--label k=v] [--location LOC]
+usage: compare-resources.sh --scope SCOPE [--type TYPE] [--term TEXT] [--label k=v] [--location LOC]
+
+  --type is optional; omit it to compare an unfiltered search of every type.
 
 examples:
+  ./scripts/compare-resources.sh --scope projects/my-project
   ./scripts/compare-resources.sh --scope projects/my-project --type bucket
   ./scripts/compare-resources.sh --scope organizations/123 --type bucket --type vm \
       --label env=prod --location europe-west2 --location europe-west1

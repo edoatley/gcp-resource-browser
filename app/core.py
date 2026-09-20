@@ -285,9 +285,7 @@ def _cache_key(filters: SearchFilters) -> str:
 _PROJECT_IDS_BY_SCOPE: dict[str, dict[str, str]] = {}
 
 
-def project_ids_for_scope(
-    scope: str, client: asset_v1.AssetServiceClient
-) -> dict[str, str]:
+def project_ids_for_scope(scope: str, client: asset_v1.AssetServiceClient) -> dict[str, str]:
     """Map project number -> project ID for every project visible in a scope.
 
     One call regardless of how many projects the scope holds, because a CAI
@@ -482,9 +480,7 @@ class _Prepared:
     truncated: bool = False
 
 
-def _prepare(
-    filters: SearchFilters, client: asset_v1.AssetServiceClient | None
-) -> _Prepared:
+def _prepare(filters: SearchFilters, client: asset_v1.AssetServiceClient | None) -> _Prepared:
     """Validate, resolve and compile everything before the first API call."""
     validate_scope(filters.scope)
     asset_types = resolve_asset_types(filters.resource_types)
@@ -494,8 +490,7 @@ def _prepare(
     # echoed back to the caller is the one actually sent.
     try:
         projects = [
-            resolve_project_filter(filters.scope, project, client)
-            for project in filters.projects
+            resolve_project_filter(filters.scope, project, client) for project in filters.projects
         ]
     except gcp_exceptions.GoogleAPICallError as exc:
         raise _translate(exc, filters.scope) from exc
@@ -554,9 +549,7 @@ def search_resources(
         # Enrichment, not discovery: one extra call for the scope, joined onto
         # a set the search already narrowed.
         try:
-            bindings = fetch_iam_bindings(
-                filters.scope, prepared.asset_types, prepared.client
-            )
+            bindings = fetch_iam_bindings(filters.scope, prepared.asset_types, prepared.client)
         except gcp_exceptions.GoogleAPICallError as exc:
             raise _translate(exc, filters.scope) from exc
         results = attach_iam(results, bindings)

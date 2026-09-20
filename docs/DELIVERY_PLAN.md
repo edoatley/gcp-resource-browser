@@ -47,7 +47,7 @@ dependency but unused; no tests.
   CLI) rather than applied silently.
 - ☑ Capture more of the CAI payload: `full_name`, `asset_type`, `labels`, `create_time`,
   `parent_full_resource_name`, `state`. `full_name` is the join key Phase 5 needs.
-- ☑ `pytest` suite (34 tests) with the CAI client faked — no network, no credentials — plus
+- ☑ `pytest` suite with the CAI client faked (34 tests at the time; it has grown since) — no network, no credentials — plus
   `ruff` lint and format, both clean.
 - ☑ API scope generalised to match the CLI: `GET /v1/resources?scope=...&type=...` accepts
   project, folder, or organization. The `/v1` prefix was pulled forward from Phase 5, since
@@ -497,7 +497,7 @@ None of these can be observed below roughly a few hundred projects.
   (some corporate egress proxies) this phase is simply unavailable. Confirm the deployment
   target's egress before starting.
 - **Blast radius.** Async is viral: core, both surfaces, the scripts module, and every test that
-  calls `search_resources`. Roughly 240 tests touch that path today.
+  calls `search_resources`. Roughly 260 tests touch that path today.
 - **The trap it must avoid.** Marking handlers `async def` while still calling the *sync*
   client would stall the event loop and make throughput worse than today. If this phase is done
   halfway, it is worse than not done.

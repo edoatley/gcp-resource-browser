@@ -52,9 +52,7 @@ def fetch_iam_bindings(
     return dict(bindings)
 
 
-def attach_iam(
-    resources: list[Resource], bindings: dict[str, list[IamBinding]]
-) -> list[Resource]:
+def attach_iam(resources: list[Resource], bindings: dict[str, list[IamBinding]]) -> list[Resource]:
     """Join bindings onto resources by full resource name.
 
     A resource with no attached policy gets an empty list rather than None:

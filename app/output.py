@@ -38,9 +38,7 @@ CSV_COLUMNS = (
 
 
 def to_json(resources: list[Resource]) -> str:
-    return json.dumps(
-        [r.model_dump(mode="json", exclude_none=True) for r in resources], indent=2
-    )
+    return json.dumps([r.model_dump(mode="json", exclude_none=True) for r in resources], indent=2)
 
 
 def to_csv(resources: list[Resource]) -> str:

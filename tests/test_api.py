@@ -217,9 +217,7 @@ def test_show_all_includes_suppressed_resources(client: TestClient, use_fake) ->
         )
     )
 
-    body = client.get(
-        "/v1/resources", params={"scope": "projects/p", "show_all": "true"}
-    ).json()
+    body = client.get("/v1/resources", params={"scope": "projects/p", "show_all": "true"}).json()
 
     assert body["count"] == 2
     assert body["suppressed"] == 0
@@ -232,7 +230,8 @@ def test_summary_counts_a_scope(client: TestClient, use_fake) -> None:
                 make_search_result(name="//x/1", location="europe-west2"),
                 make_search_result(name="//x/2", location="europe-west2"),
                 make_search_result(
-                    name="//x/3", asset_type="compute.googleapis.com/Instance",
+                    name="//x/3",
+                    asset_type="compute.googleapis.com/Instance",
                     location="us-central1",
                 ),
             ]
@@ -266,9 +265,7 @@ def test_include_iam_attaches_bindings_and_the_caveat(client: TestClient, use_fa
         )
     )
 
-    body = client.get(
-        "/v1/resources", params={"scope": "projects/p", "include_iam": "true"}
-    ).json()
+    body = client.get("/v1/resources", params={"scope": "projects/p", "include_iam": "true"}).json()
 
     assert body["data"][0]["iam_bindings"][0]["role"] == "roles/storage.admin"
     assert "Inherited" in body["iam_note"]
@@ -336,9 +333,7 @@ def test_readiness_is_503_when_credentials_are_missing(client: TestClient, monke
 def test_stream_emits_newline_delimited_json(client: TestClient, use_fake) -> None:
     import json
 
-    use_fake(
-        FakeAssetClient(results=[make_search_result(name=f"//x/{i}") for i in range(3)])
-    )
+    use_fake(FakeAssetClient(results=[make_search_result(name=f"//x/{i}") for i in range(3)]))
 
     response = client.get("/v1/resources/stream", params={"scope": "projects/p"})
 

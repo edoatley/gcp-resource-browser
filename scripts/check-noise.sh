@@ -12,7 +12,19 @@
 # existence, or altered one, that would be a silent corruption of an audit.
 set -euo pipefail
 
-SCOPE="${1:?usage: $0 <scope>}"
+if [[ $# -ne 1 ]]; then
+  cat >&2 <<'USAGE'
+usage: check-noise.sh <scope>
+
+  Verifies that noise reduction only ever removes rows: the suppressed result
+  must be a strict subset of the full one.
+
+example:
+  ./scripts/check-noise.sh projects/my-project
+USAGE
+  exit 2
+fi
+SCOPE="$1"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT

@@ -185,9 +185,7 @@ def search(
     show_all: bool = typer.Option(False, "--show-all", help=Help.SHOW_ALL),
     sort: list[str] = typer.Option([], "--sort", help=Help.SORT),
     include_iam: bool = typer.Option(False, "--include-iam", help=Help.INCLUDE_IAM),
-    output: OutputFormat = typer.Option(
-        OutputFormat.TABLE, "--output", "-o", help=Help.OUTPUT
-    ),
+    output: OutputFormat = typer.Option(OutputFormat.TABLE, "--output", "-o", help=Help.OUTPUT),
     also_scope: list[str] = typer.Option(
         [],
         "--also-scope",
@@ -292,9 +290,7 @@ def summary_command(
     label: list[str] = typer.Option([], "--label", "-l", help=Help.LABEL),
     location: list[str] = typer.Option([], "--location", help=Help.LOCATION),
     show_all: bool = typer.Option(False, "--show-all", help=Help.SHOW_ALL),
-    output: OutputFormat = typer.Option(
-        OutputFormat.TABLE, "--output", "-o", help=Help.OUTPUT
-    ),
+    output: OutputFormat = typer.Option(OutputFormat.TABLE, "--output", "-o", help=Help.OUTPUT),
 ) -> None:
     """Count resources in a scope by type, project and location."""
     try:
@@ -340,9 +336,7 @@ def summary_command(
 
 @cli.command("openapi")
 def openapi_command(
-    out: Path = typer.Option(
-        Path("openapi.yml"), "--out", help="Where to write the specification"
-    ),
+    out: Path = typer.Option(Path("openapi.yml"), "--out", help="Where to write the specification"),
 ) -> None:
     """Export the API's OpenAPI specification.
 

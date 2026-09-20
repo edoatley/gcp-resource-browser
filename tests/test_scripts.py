@@ -58,11 +58,16 @@ def test_filters_reach_the_query(use_fake, monkeypatch, capsys) -> None:
         "sys.argv",
         [
             "_explorer_search",
-            "--scope", "organizations/1",
-            "--type", "bucket",
-            "--label", "env=prod",
-            "--location", "europe-west2",
-            "--term", "backup",
+            "--scope",
+            "organizations/1",
+            "--type",
+            "bucket",
+            "--label",
+            "env=prod",
+            "--location",
+            "europe-west2",
+            "--term",
+            "backup",
         ],
     )
 

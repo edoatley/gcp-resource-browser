@@ -48,8 +48,12 @@ def test_summary_counts_by_every_dimension() -> None:
     resources = [
         resource("//x/1", project_id="p1", location="europe-west2"),
         resource("//x/2", project_id="p1", location="europe-west2"),
-        resource("//x/3", asset_type="compute.googleapis.com/Instance", project_id="p2",
-                 location="us-central1"),
+        resource(
+            "//x/3",
+            asset_type="compute.googleapis.com/Instance",
+            project_id="p2",
+            location="us-central1",
+        ),
     ]
 
     totals = summarise("organizations/1", resources, suppressed=7)

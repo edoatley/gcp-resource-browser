@@ -75,6 +75,8 @@ the user runs `gcloud auth application-default login` first. This is a deliberat
 - `app/config.py` — site overrides for the asset-type mapping and noise rules.
 - `app/aggregate.py` — IAM join and the summary rollup.
 - `app/output.py` — JSON/CSV emitters for the CLI.
+- `app/fanout.py` — bounded concurrent search across several scopes.
+- `app/cache.py` — opt-in TTL cache, inert unless a caller sets a TTL.
 - `app/params.py` — `SearchFilters` (what a search takes) and `Help` (how each filter is
   described). Both surfaces read from here.
 - `app/asset_types.json` — the friendly-name mapping, loaded by `core.py` and read with `jq`
@@ -132,6 +134,20 @@ client-side to results as they stream back — forced, not chosen: `assetType` i
 CAI field and `asset_types` is an include list with no exclusion. A user filter narrows what is
 *fetched*; a noise rule hides low-value rows from a result asked for broadly. Because of this,
 `limit` caps *visible* results, and the pager is consumed lazily.
+
+**`core.stream_resources` is the generator; `search_resources` wraps it.** Add behaviour to
+`_prepare`/`_Prepared.iterate` so both get it. Streaming exists so a large result set need not
+be materialised before the first row.
+
+**Fan-out (`--also-scope`) is not the per-project iteration the PRD forbids** — each scope is
+still one scope-wide CAI search; only the scopes are parallel. It exists because CAI checks
+permission on the scope itself, so someone without org-level viewer has no other route. Keep it
+bounded (default 8, below anyio's 40) and keep failures loud: a partial answer mistaken for a
+complete one under-reports the estate. CLI exit 7 means partial.
+
+**The cache is off by default and should stay that way.** Silently answering an audit from a
+stale cache is wrong when someone is verifying a fix. Any new filter must go into `_cache_key`,
+or one filter's results will be served for another.
 
 **Sorting is server-side** (`order_by`), on CAI's fixed field list in `params.SORTABLE_FIELDS`.
 Unknown fields are rejected, never dropped — a silently ignored sort gives plausible output in

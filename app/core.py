@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -22,6 +22,7 @@ from google.cloud import asset_v1
 from google.rpc.error_details_pb2 import ErrorInfo
 
 from app.aggregate import ATTACHED_IAM_NOTE, attach_iam, fetch_iam_bindings
+from app.cache import TTLCache
 from app.config import load_config
 from app.models import Resource
 from app.noise import NoiseFilter
@@ -250,6 +251,34 @@ def _to_resource(result: asset_v1.ResourceSearchResult) -> Resource:
     )
 
 
+# Shared response cache. Inert unless a caller sets a TTL.
+_RESPONSE_CACHE = TTLCache()
+
+
+def cache_stats() -> tuple[int, int]:
+    """Hits and misses, for benchmarking."""
+    return _RESPONSE_CACHE.hits, _RESPONSE_CACHE.misses
+
+
+def _cache_key(filters: SearchFilters) -> str:
+    """Everything that changes the answer, and nothing that does not."""
+    return repr(
+        (
+            filters.scope,
+            tuple(filters.resource_types),
+            filters.free_text,
+            tuple(filters.labels),
+            tuple(filters.locations),
+            tuple(filters.projects),
+            filters.raw_query,
+            filters.limit,
+            filters.show_all,
+            tuple(filters.sort),
+            filters.include_iam,
+        )
+    )
+
+
 # Project number -> ID, keyed by scope. Built with one CAI call per scope, not
 # one per project: resolving 2000 projects individually is precisely the
 # per-project fan-out the PRD rejects.
@@ -405,19 +434,58 @@ def _translate(exc: gcp_exceptions.GoogleAPICallError, scope: str) -> ResourceEx
     return UpstreamError(f"Cloud Asset Inventory call failed: {exc.message}")
 
 
-def search_resources(
+def stream_resources(
     filters: SearchFilters,
     client: asset_v1.AssetServiceClient | None = None,
-) -> SearchResult:
-    """Search a scope for resources matching `filters`.
+) -> Iterator[Resource]:
+    """Yield matching resources one at a time.
 
-    Filters are compiled into a CAI query and evaluated upstream. Returns the
-    resources found, whether `limit` truncated them, and the query that was
-    actually sent -- the last so both surfaces can show it, since a filter that
-    silently compiles to the wrong thing is otherwise invisible.
+    The generator form exists so a 2000-project result set need not be fully
+    materialised before the first row is available. `search_resources` wraps
+    this when a list is wanted; the streaming API endpoint consumes it directly.
 
-    Relies on locally authenticated ADC (`gcloud auth application-default login`).
+    Note what is NOT yielded: noise-suppressed resources, and anything past
+    `limit`. Callers needing the suppression counts use `search_resources`,
+    which can report them once the stream is exhausted.
     """
+    prepared = _prepare(filters, client)
+    yield from prepared.iterate()
+
+
+@dataclass
+class _Prepared:
+    """A validated, compiled search, ready to execute."""
+
+    request: asset_v1.SearchAllResourcesRequest
+    asset_types: list[str]
+    query: str
+    client: asset_v1.AssetServiceClient
+    filters: SearchFilters
+    noise: NoiseFilter
+
+    def iterate(self) -> Iterator[Resource]:
+        limit = self.filters.limit
+        yielded = 0
+        try:
+            for item in self.client.search_all_resources(request=self.request):
+                resource = _to_resource(item)
+                if not self.noise.keep(resource):
+                    continue
+                if limit is not None and yielded == limit:
+                    self.truncated = True
+                    return
+                yielded += 1
+                yield resource
+        except gcp_exceptions.GoogleAPICallError as exc:
+            raise _translate(exc, self.filters.scope) from exc
+
+    truncated: bool = False
+
+
+def _prepare(
+    filters: SearchFilters, client: asset_v1.AssetServiceClient | None
+) -> _Prepared:
+    """Validate, resolve and compile everything before the first API call."""
     validate_scope(filters.scope)
     asset_types = resolve_asset_types(filters.resource_types)
     client = client or get_client()
@@ -443,54 +511,66 @@ def search_resources(
     except QueryError as exc:
         raise InvalidFilterError(str(exc)) from exc
 
-    request = asset_v1.SearchAllResourcesRequest(
-        scope=filters.scope,
+    return _Prepared(
+        request=asset_v1.SearchAllResourcesRequest(
+            scope=filters.scope,
+            asset_types=asset_types,
+            query=query,
+            page_size=filters.page_size,
+            order_by=build_order_by(filters.sort),
+        ),
         asset_types=asset_types,
         query=query,
-        page_size=filters.page_size,
-        order_by=build_order_by(filters.sort),
+        client=client,
+        filters=filters,
+        noise=NoiseFilter(enabled=not filters.show_all),
     )
 
-    limit = filters.limit
-    noise = NoiseFilter(enabled=not filters.show_all)
-    results: list[Resource] = []
-    truncated = False
 
-    try:
-        # Suppression happens here rather than in the query, because CAI has no
-        # way to exclude an asset type. That makes `limit` a cap on *visible*
-        # results: iterate lazily, skipping noise, and stop one past the limit
-        # so truncation is detected without draining the pager.
-        for item in client.search_all_resources(request=request):
-            resource = _to_resource(item)
-            if not noise.keep(resource):
-                continue
-            if limit is not None and len(results) == limit:
-                truncated = True
-                break
-            results.append(resource)
-    except gcp_exceptions.GoogleAPICallError as exc:
-        raise _translate(exc, filters.scope) from exc
+def search_resources(
+    filters: SearchFilters,
+    client: asset_v1.AssetServiceClient | None = None,
+) -> SearchResult:
+    """Search a scope for resources matching `filters`.
 
-    results = _fill_project_ids(results, filters.scope, client)
+    Filters are compiled into a CAI query and evaluated upstream. Returns the
+    resources found, whether `limit` truncated them, and the query that was
+    actually sent -- the last so both surfaces can show it, since a filter that
+    silently compiles to the wrong thing is otherwise invisible.
+
+    Relies on locally authenticated ADC (`gcloud auth application-default login`).
+    """
+    if filters.cache_ttl > 0:
+        _RESPONSE_CACHE.ttl = filters.cache_ttl
+        if (cached := _RESPONSE_CACHE.get(_cache_key(filters))) is not None:
+            return cached
+
+    prepared = _prepare(filters, client)
+    results = list(prepared.iterate())
+    results = _fill_project_ids(results, filters.scope, prepared.client)
 
     iam_note = None
     if filters.include_iam:
         # Enrichment, not discovery: one extra call for the scope, joined onto
         # a set the search already narrowed.
         try:
-            bindings = fetch_iam_bindings(filters.scope, asset_types, client)
+            bindings = fetch_iam_bindings(
+                filters.scope, prepared.asset_types, prepared.client
+            )
         except gcp_exceptions.GoogleAPICallError as exc:
             raise _translate(exc, filters.scope) from exc
         results = attach_iam(results, bindings)
         iam_note = ATTACHED_IAM_NOTE
 
-    return SearchResult(
+    result = SearchResult(
         resources=results,
-        truncated=truncated,
-        query=query,
-        asset_types=asset_types,
-        suppressed=noise.suppressed,
-        suppressed_summary=noise.summary(),
+        truncated=prepared.truncated,
+        query=prepared.query,
+        asset_types=prepared.asset_types,
+        suppressed=prepared.noise.suppressed,
+        suppressed_summary=prepared.noise.summary(),
         iam_note=iam_note,
     )
+    if filters.cache_ttl > 0:
+        _RESPONSE_CACHE.put(_cache_key(filters), result)
+    return result

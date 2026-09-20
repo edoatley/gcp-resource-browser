@@ -517,3 +517,43 @@ def test_failed_lookup_degrades_to_the_number() -> None:
 
     assert result.resources[0].project_id is None
     assert result.resources[0].project == "633423842545"
+
+
+# --- streaming --------------------------------------------------------------
+
+
+def test_stream_yields_lazily_without_materialising() -> None:
+    """The point of streaming: the first row before the last is fetched."""
+    client = FakeAssetClient(results=[make_search_result(name=f"//x/{i}") for i in range(500)])
+
+    stream = core.stream_resources(filters(limit=None), client=client)
+    first = next(stream)
+
+    assert first.full_name == "//x/0"
+
+
+def test_stream_applies_noise_reduction() -> None:
+    client = FakeAssetClient(
+        results=[
+            make_search_result(name="//x/api", asset_type="serviceusage.googleapis.com/Service"),
+            make_search_result(name="//x/bucket"),
+        ]
+    )
+
+    streamed = list(core.stream_resources(filters(types=()), client=client))
+
+    assert [r.full_name for r in streamed] == ["//x/bucket"]
+
+
+def test_stream_respects_the_limit() -> None:
+    client = FakeAssetClient(results=[make_search_result(name=f"//x/{i}") for i in range(100)])
+
+    assert len(list(core.stream_resources(filters(limit=7), client=client))) == 7
+
+
+def test_stream_validates_before_yielding_anything() -> None:
+    """A bad scope must fail at once, not part-way through a stream."""
+    client = FakeAssetClient()
+
+    with pytest.raises(core.InvalidScopeError):
+        next(core.stream_resources(filters(scope="nope"), client=client))

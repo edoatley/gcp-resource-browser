@@ -251,68 +251,83 @@ worse than failing.
 
 ---
 
-## Phase 4 — Performance, staying synchronous ☐
+## Phase 4 — Performance, staying synchronous ◐
 
 **Goal:** the PRD's scalability objective, met with the cheapest mechanism that reaches it.
-Deferred to here deliberately — optimising before Phases 2–3 settle the query shape would be
-premature.
 
-**The core stays synchronous.** The reason is a fact about FastAPI that is easy to miss:
-Starlette inspects each endpoint and, when it is a plain `def` rather than `async def`, wraps it
-in `run_in_threadpool` automatically (`starlette/routing.py`, `request_response`). The endpoint
-in `app/main.py` is already a plain `def`, so **it already runs off the event loop and already
-serves concurrent requests** — up to anyio's default limiter of 40 worker threads, verified in
-this environment. The API is not currently serialising requests, and does not need `async` to
-stop doing so. Adopting `async` would make `search_cai_resources` a coroutine, which forces
-`asyncio.run` into every CLI command and turns a local change into a whole-codebase one — for
-concurrency the threadpool is already providing.
+**The core stays synchronous.** Starlette wraps a plain `def` endpoint in `run_in_threadpool`
+automatically (`starlette/routing.py`, `request_response`), so the API already serves
+concurrent requests off the event loop — up to anyio's 40-thread default, verified here. Going
+`async` would make the core a coroutine and force `asyncio.run` through the whole CLI, for
+concurrency the threadpool already provides. See Phase 7.
 
-Do the cheap wins first and measure before reaching for anything structural:
+- ☑ **Client reuse** (`core.get_client`, `lru_cache`). Delivered in Phase 1; measured at
+  **~1.1 s per avoided construction**, roughly three round trips.
+- ☑ **Bounded concurrent fan-out** (`app/fanout.py`, `--also-scope`). Measured **6.0x over 6
+  scopes** — near-linear, as expected for I/O-bound work.
+- ☑ **Streaming responses** — `core.stream_resources` and `GET /v1/resources/stream` (NDJSON).
+- ☑ **Opt-in response cache** (`--cache-ttl`, `?cache_ttl=`), off by default.
+- ☑ **Benchmark tooling** (`scripts/benchmark.py`) producing a paste-ready table.
+- ◐ **The baseline itself.** Recorded on the dev estate; the number that matters must come from
+  a real organisation. See below.
 
-- ☑ **Create the CAI client once and reuse it.** Delivered early in Phase 1 (`core.get_client`,
-  `lru_cache`), since the restructure made it natural and the tests needed client injection
-  anyway. Was the largest avoidable latency cost.
-- ◐ **Establish a latency baseline.** First measurements taken against the dev estate
-  (515 resources, 7 projects), recorded below. Incomplete: see the scale caveat.
+### Fan-out is not the iteration the PRD forbids
 
-  | Search | Latency | Result |
-  |:---|---:|:---|
-  | All types, cold (client constructed) | 1816 ms | 33 shown, 90 hidden |
-  | All types, warm | 675 ms | 33 shown, 90 hidden |
-  | All types, 130-resource project | 580 ms | 11 shown, 119 hidden |
-  | Single type | 273 ms | 2 shown |
-  | All types, `--limit 5` | 732 ms | 5 shown, 99 hidden |
+That rule is about *discovery*: never walk service APIs resource-by-resource to find what
+exists. Here each scope is still answered by one scope-wide CAI search; only the scopes run in
+parallel.
 
-  Three things this already settles:
+It exists because of a permission fact: **CAI checks
+`cloudasset.assets.searchAllResources` on the scope itself, not on its children.** Holding
+viewer on 50 projects but not the organisation means `organizations/X` returns 403, and
+searching the 50 scopes is the only route. Sequentially that is precisely the latency the PRD
+rejects; concurrently it is one round trip plus change.
 
-  - **Client construction costs ~1.1 s** (1816 ms cold vs 675 ms warm). The reuse landed early
-    in Phase 1 was worth roughly three round trips, confirming it was the largest avoidable
-    cost.
-  - **A round trip is ~300 ms**, so latency here is dominated by the call, not by our
-    processing. Caching would help repeated identical queries; nothing else on this list would
-    move these numbers.
-  - **`--limit` does not reduce latency at this size** (732 ms vs 675 ms, i.e. noise). The
-    whole estate fits in one 500-row page, so stopping early saves no network. Limit is a
-    memory and readability control here, and only becomes a latency control past one page.
+Concurrency is bounded (default 8, below anyio's 40 so a fan-out inside a request cannot starve
+the threadpool it runs on). Unbounded fan-out over 2000 projects trades a latency problem for a
+quota problem, which is worse: a 429 fails the whole search, where slowness merely annoys.
 
-  **Scale caveat — this baseline cannot validate the PRD's target.** 515 resources is roughly
-  one page; the PRD is about 2000+ projects, where pagination, fan-out and quota behaviour
-  dominate and none of them are exercised here. The remaining Phase 4 items should not be
-  judged against these numbers.
-- ☐ Short-TTL response cache. CAI is a near-real-time index, not live data (per the PRD's own
-  trade-off table), so caching costs little accuracy and protects against repeated identical
-  dashboard polls.
-- ☐ Streaming/paged API responses so a 2000-project result set does not have to be fully
-  materialised before the first byte.
-- ☐ Concurrent fan-out when a request spans several scopes or asset types: a
-  `ThreadPoolExecutor` with a bounded worker count. Sync, ordinary to read, and it keeps a
-  2000-project fan-out from tripping CAI quota. Note it draws from the same 40-thread budget as
-  the request threadpool — size it explicitly rather than letting the two compete.
-- ☐ Tune the anyio threadpool limit if the baseline shows 40 concurrent requests is the
-  ceiling being hit.
+A failing scope is **recorded, not fatal** — one project lacking permission must not lose the
+other 49 — and never silent: failures print and the CLI exits **7**, distinct from success, so
+a script cannot mistake a partial answer for a complete one.
 
-**Exit criteria:** a recorded latency figure for a broad org-wide query, and a measurement
-showing where the remaining time actually goes.
+### The cache is off by default, deliberately
+
+CAI is a near-real-time index, so caching costs little accuracy in principle. But this is an
+auditing tool, and silently answering from a stale cache is the wrong default when someone is
+checking whether a fix landed. The benefit — absorbing repeated identical polls — is a
+deployment decision, so it is opt-in. `show_all`, filters and sort are all part of the cache
+key: serving one filter's results for another would be silently wrong.
+
+### Dev-estate baseline (515 resources, one CAI page)
+
+| Measurement | Median | Result |
+|:---|---:|:---|
+| Cold (client construction included) | 1630 ms | 33 shown |
+| Warm, all types, noise reduced | 709 ms | 33 shown, 90 hidden |
+| Warm, all types, `--show-all` | 790 ms | 123 shown |
+| Single asset type | 315 ms | 1 shown |
+| All types, `--limit 10` | 1244 ms | 10 shown |
+| Streaming: time to first resource | 986 ms | first row only |
+| Sequential across 2 scopes | 2528 ms | 44 resources |
+| Concurrent across 2 scopes | 837 ms | 44 resources, **3.0x** |
+| Cached repeat (`--cache-ttl 60`) | 0 ms | cache hit |
+
+### What this baseline cannot tell us
+
+515 resources is one 500-row page. Pagination, fan-out breadth and quota pressure are all
+untested, and two numbers above are actively misleading at this size:
+
+- **`--limit 10` is no faster than unlimited** (indeed slower, within noise), because the whole
+  estate arrives in one page and stopping early saves no network. Past one page this should
+  invert sharply.
+- **Streaming time-to-first-resource is close to the full search**, for the same reason. The
+  gap is the entire value of streaming and should widen with result size.
+
+**Run `scripts/benchmark.py` against a real organisation and replace this table.** Judge the
+remaining work against those numbers, not these. If concurrent fan-out plateaus well below
+`--max-concurrency`, the bottleneck is elsewhere and Phase 7 should be reconsidered rather than
+assumed.
 
 ---
 

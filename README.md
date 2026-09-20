@@ -10,8 +10,9 @@ too quota-hungry to be viable.
 
 > **Status: usable.** Phases 0–3, 5 and 6 are complete: search every resource type by default with
 > noise reduction, server-side filtering and sorting, IAM enrichment, aggregated summaries, and
-> JSON/CSV output, plus a container image and CI. Phase 4 (performance at 2000-project scale)
-> is deferred — it cannot be measured without an estate that size. See the delivery plan.
+> JSON/CSV output, concurrent multi-scope search, streaming, and a container image with CI.
+> Phase 4's tuning is built but its baseline still needs measuring on a real organisation —
+> run `scripts/benchmark.py` there. See the delivery plan.
 
 ## Requirements
 
@@ -107,6 +108,10 @@ uv run gcp-explorer search projects/my-project --type bucket --include-iam -o js
 # Count a scope by type, project and location
 uv run gcp-explorer summary organizations/123456789
 
+# Search several scopes concurrently — the route when you hold viewer on
+# individual projects but not on the organisation
+uv run gcp-explorer search projects/a --also-scope projects/b --also-scope projects/c
+
 uv run gcp-explorer types      # list supported type names
 uv run gcp-explorer --help
 ```
@@ -130,6 +135,40 @@ suppressed says so explicitly rather than claiming nothing was found.
 Suppression is applied to results rather than compiled into the query, because CAI has no way
 to exclude an asset type — `assetType` is not a queryable field, and `asset_types` is an
 include list. `--limit` still counts *visible* results.
+
+### Searching many scopes at once
+
+Cloud Asset Inventory checks permission on the **scope itself**, not on its children. Holding
+`cloudasset.viewer` on 50 projects but not on the organisation means `organizations/X` returns
+403 — the only route is to search the 50 scopes, and `--also-scope` does that concurrently
+(bounded by `--max-concurrency`, default 8).
+
+A scope you cannot read is reported rather than dropped, and does not cost you the others. The
+CLI exits **7** when some scopes failed, so a script cannot mistake a partial answer for a
+complete one.
+
+### Streaming
+
+`GET /v1/resources/stream` emits newline-delimited JSON as CAI returns rows, for result sets
+where waiting for the whole payload is worse than parsing incrementally. It does not report
+suppression counts — they are not known until the stream ends — so use `/v1/summary` for
+totals.
+
+### Caching
+
+Off by default. `--cache-ttl SECONDS` / `?cache_ttl=` enables it. The default is off because
+silently answering an audit from a stale cache is wrong when someone is checking whether a fix
+landed; the benefit is absorbing repeated identical polls, which is a deployment choice.
+
+### Measuring
+
+```bash
+uv run python -m scripts.benchmark --scope organizations/<id> --repeats 3
+```
+
+Prints a markdown table ready to paste into the delivery plan. Worth running against a real
+estate: on a small one everything fits in a single 500-row CAI page, which makes `--limit` and
+streaming look pointless when they are not.
 
 ### IAM enrichment
 

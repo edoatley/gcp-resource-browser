@@ -331,3 +331,47 @@ def test_readiness_is_503_when_credentials_are_missing(client: TestClient, monke
 
     assert response.status_code == 503
     assert "Application Default Credentials" in response.json()["detail"]
+
+
+def test_stream_emits_newline_delimited_json(client: TestClient, use_fake) -> None:
+    import json
+
+    use_fake(
+        FakeAssetClient(results=[make_search_result(name=f"//x/{i}") for i in range(3)])
+    )
+
+    response = client.get("/v1/resources/stream", params={"scope": "projects/p"})
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/x-ndjson")
+    lines = [line for line in response.text.splitlines() if line]
+    assert len(lines) == 3
+    assert json.loads(lines[0])["full_name"] == "//x/0"
+
+
+def test_stream_applies_noise_reduction(client: TestClient, use_fake) -> None:
+    use_fake(
+        FakeAssetClient(
+            results=[
+                make_search_result(
+                    name="//x/api", asset_type="serviceusage.googleapis.com/Service"
+                ),
+                make_search_result(name="//x/bucket"),
+            ]
+        )
+    )
+
+    response = client.get("/v1/resources/stream", params={"scope": "projects/p"})
+
+    lines = [line for line in response.text.splitlines() if line]
+    assert len(lines) == 1
+
+
+def test_cache_ttl_is_accepted_and_off_by_default(client: TestClient, use_fake) -> None:
+    fake = use_fake(FakeAssetClient(results=[make_search_result()]))
+    core._RESPONSE_CACHE.clear()
+
+    client.get("/v1/resources", params={"scope": "projects/p"})
+    client.get("/v1/resources", params={"scope": "projects/p"})
+
+    assert len(fake.requests) == 2, "no caching without an explicit ttl"

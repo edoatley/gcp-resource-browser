@@ -144,6 +144,20 @@ paths:
           title: Include Iam
         description: Attach each resource's directly-attached IAM bindings. One extra
           call for the whole scope. Inherited bindings are not included.
+      - name: cache_ttl
+        in: query
+        required: false
+        schema:
+          type: number
+          maximum: 3600
+          minimum: 0
+          description: Seconds to cache identical searches. 0 (the default) disables
+            it -- an audit tool should not answer from a stale cache unless asked
+            to.
+          default: 0.0
+          title: Cache Ttl
+        description: Seconds to cache identical searches. 0 (the default) disables
+          it -- an audit tool should not answer from a stale cache unless asked to.
       responses:
         '200':
           description: Successful Response
@@ -181,6 +195,132 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/resources/stream:
+    get:
+      summary: Stream resources as newline-delimited JSON
+      description: 'One JSON object per line, emitted as CAI returns them.
+
+
+        For result sets large enough that waiting for the whole payload is worse
+
+        than parsing incrementally. Unlike `/v1/resources` this does not report
+
+        suppression counts -- they are not known until the stream ends, and a
+
+        trailer would be missed by most clients. Use `/v1/summary` for totals.'
+      operationId: stream_resources_v1_resources_stream_get
+      parameters:
+      - name: scope
+        in: query
+        required: true
+        schema:
+          type: string
+          description: 'CAI scope: organizations/<id>, folders/<id>, or projects/<id>'
+          examples:
+          - organizations/123
+          title: Scope
+        description: 'CAI scope: organizations/<id>, folders/<id>, or projects/<id>'
+      - name: type
+        in: query
+        required: false
+        schema:
+          type: array
+          items:
+            type: string
+          description: Resource type, repeatable. A friendly name, a raw CAI asset
+            type, or an RE2 pattern.
+          title: Type
+        description: Resource type, repeatable. A friendly name, a raw CAI asset type,
+          or an RE2 pattern.
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+          description: Free-text term, matched across all searchable fields
+          default: ''
+          title: Q
+        description: Free-text term, matched across all searchable fields
+      - name: label
+        in: query
+        required: false
+        schema:
+          type: array
+          items:
+            type: string
+          description: 'Label filter, repeatable: `key=value`, or `key` to match any
+            value'
+          title: Label
+        description: 'Label filter, repeatable: `key=value`, or `key` to match any
+          value'
+      - name: location
+        in: query
+        required: false
+        schema:
+          type: array
+          items:
+            type: string
+          description: Location filter, repeatable; several are ORed. Supports `*`
+            wildcards.
+          title: Location
+        description: Location filter, repeatable; several are ORed. Supports `*` wildcards.
+      - name: project
+        in: query
+        required: false
+        schema:
+          type: array
+          items:
+            type: string
+          description: Project filter, repeatable; several are ORed. Accepts a project
+            ID or number (IDs are resolved to numbers, which is what CAI matches on).
+          title: Project
+        description: Project filter, repeatable; several are ORed. Accepts a project
+          ID or number (IDs are resolved to numbers, which is what CAI matches on).
+      - name: limit
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+            minimum: 1
+          - type: 'null'
+          description: Maximum resources to return
+          title: Limit
+        description: Maximum resources to return
+      - name: show_all
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Include resources hidden by default (enabled API services,
+            image layers, auto-created default routes and subnets, and similar)
+          default: false
+          title: Show All
+        description: Include resources hidden by default (enabled API services, image
+          layers, auto-created default routes and subnets, and similar)
+      - name: sort
+        in: query
+        required: false
+        schema:
+          type: array
+          items:
+            type: string
+          description: 'Sort field, with optional ` DESC`. Repeatable for tie-breaks.
+            One of: name, assetType, project, displayName, description, location,
+            createTime, updateTime, state, parentFullResourceName, parentAssetType.'
+          title: Sort
+        description: 'Sort field, with optional ` DESC`. Repeatable for tie-breaks.
+          One of: name, assetType, project, displayName, description, location, createTime,
+          updateTime, state, parentFullResourceName, parentAssetType.'
+      responses:
+        '200':
+          description: Successful Response
         '422':
           description: Validation Error
           content:

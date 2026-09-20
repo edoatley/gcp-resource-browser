@@ -150,7 +150,149 @@ Note this compares with suppression **off**. gcloud has no notion of noise reduc
 including it would compare two different questions; step 9 covers that property instead. This is the only check that validates the
 *query itself* — unit tests fake the client, so they can only prove we sent what we intended.
 
-## 11. The API
+## 11. Sorting, output formats and aggregation (Phase 5)
+
+```bash
+# Server-side sort. CAI orders it, not us -- sorting locally would order one
+# page of an arbitrary selection, which looks right and is wrong.
+uv run gcp-explorer search projects/sudoku-eo-2026 --type serviceaccount \
+    --sort 'displayName DESC'
+
+# An unknown sort field must be REJECTED, not quietly ignored
+uv run gcp-explorer search projects/sudoku-eo-2026 --type bucket --sort bogus; echo "exit=$?"
+
+# Machine-readable output. Payload on stdout, warnings on stderr.
+uv run gcp-explorer search projects/sudoku-eo-2026 -o json 2>/dev/null | jq 'length'
+uv run gcp-explorer search projects/idp-prototype-edo --type bucket -o csv | head -2
+
+# Prove stdout stays parseable even when there is plenty to warn about
+uv run gcp-explorer search projects/gcp-sandbox-2026-18798 -o json 2>/dev/null | jq 'length'
+```
+The `--sort bogus` case must exit 2 and list the sortable fields.
+
+### Aggregation
+
+```bash
+uv run gcp-explorer summary projects/sudoku-eo-2026
+uv run gcp-explorer summary projects/sudoku-eo-2026 -o json | jq '.by_asset_type'
+```
+Check the **By project** block names each project once. It previously split one project
+across two rows — an ID row and a project-number row.
+
+### IAM enrichment
+
+```bash
+uv run gcp-explorer search projects/idp-prototype-edo --type bucket --include-iam -o json \
+    2>/dev/null | jq '.[] | {display_name, iam_bindings: [.iam_bindings[].role]}'
+```
+Then read the caveat printed to stderr: these are **attached** bindings only. A grant inherited
+from the parent project confers real access and is not shown. Confirmed against live data — the
+project-level policy comes back as its own row, not attached to the bucket beneath it.
+
+```bash
+# Without --include-iam the field is absent, not empty: "not requested" and
+# "nothing granted" must never look alike.
+uv run gcp-explorer search projects/idp-prototype-edo --type bucket -o json \
+    2>/dev/null | jq '.[0] | has("iam_bindings")'      # false
+```
+
+## 12. Concurrency and caching (Phase 4)
+
+```bash
+# Several scopes at once. This is the route when you hold viewer on individual
+# projects but not on the organization -- CAI checks permission on the scope
+# itself, so organizations/<id> would simply 403.
+uv run gcp-explorer search projects/idp-prototype-edo \
+    --also-scope projects/sudoku-eo-2026 \
+    --also-scope projects/gcp-sandbox-2026-18798 \
+    --type bucket --type serviceaccount
+
+# A scope you cannot read must be REPORTED, not silently dropped, and must not
+# cost you the scopes you can read. Expect results plus a FAILED line, exit 7.
+uv run gcp-explorer search projects/idp-prototype-edo \
+    --also-scope projects/does-not-exist-xyz --type bucket; echo "exit=$?"
+
+# Streaming: rows arrive as CAI returns them
+curl -sN 'http://127.0.0.1:8000/v1/resources/stream?scope=projects/sudoku-eo-2026&limit=5' \
+    | jq -c '{display_name, asset_type}'
+
+# Caching is OFF unless asked for. Repeat an identical search to see the effect.
+uv run gcp-explorer search projects/sudoku-eo-2026 --cache-ttl 60 -o json >/dev/null 2>&1
+time uv run gcp-explorer search projects/sudoku-eo-2026 --cache-ttl 60 -o json >/dev/null 2>&1
+```
+
+### The baseline — run this on the large organization
+
+```bash
+uv run python -m scripts.benchmark --scope organizations/<id> --repeats 3
+
+# Or, without org-level access, across many projects
+uv run python -m scripts.benchmark \
+    --scope projects/a --scope projects/b --scope projects/c --repeats 3
+```
+
+It prints a markdown table ready to paste into `docs/DELIVERY_PLAN.md`. **This is the
+measurement Phase 4 is blocked on** — the dev estate is ~515 resources in a single CAI page, so
+pagination, fan-out breadth and quota pressure are all untested. On the dev estate it reports a
+3.0x speedup over 2 scopes and a ~1.6 s cold cost for client construction.
+
+Watch three things there in particular:
+
+1. **`All types, --limit 10` vs unlimited.** On a single-page estate these are the same; past
+   one page the limited one should be dramatically faster. If it is not, the early stop is not
+   saving network.
+2. **Streaming time-to-first-resource** versus the full warm search. The gap is the value of
+   streaming, and should widen sharply with result size.
+3. **Concurrent versus sequential** across many scopes. Near-linear speedup is expected up to
+   `--max-concurrency` (default 8); if it plateaus early, the bottleneck is elsewhere and the
+   remaining Phase 4 work should be re-judged.
+
+## 13. The container (Phase 6)
+
+```bash
+docker build -t gcp-explorer .
+
+# The CLI, with ADC mounted read-only
+docker run --rm \
+    -v "$HOME/.config/gcloud/application_default_credentials.json:/adc.json:ro" \
+    -e GOOGLE_APPLICATION_CREDENTIALS=/adc.json \
+    -e GOOGLE_CLOUD_QUOTA_PROJECT=gcp-resource-browser-eo \
+    gcp-explorer list-resources projects/idp-prototype-edo bucket
+
+# The API
+docker run --rm -d --name gx -p 8000:8000 \
+    -v "$HOME/.config/gcloud/application_default_credentials.json:/adc.json:ro" \
+    -e GOOGLE_APPLICATION_CREDENTIALS=/adc.json \
+    -e GOOGLE_CLOUD_QUOTA_PROJECT=gcp-resource-browser-eo \
+    gcp-explorer
+curl -s http://127.0.0.1:8000/v1/resources?scope=projects/idp-prototype-edo\&type=bucket | jq .count
+docker stop gx
+```
+
+### The probes must behave differently
+
+```bash
+# No credentials at all: liveness stays UP, readiness reports 503.
+docker run --rm -d --name gx-bare -p 8001:8000 gcp-explorer
+sleep 3
+curl -s http://127.0.0.1:8001/healthz                    # {"status":"ok"}
+curl -s -w ' [%{http_code}]' http://127.0.0.1:8001/readyz # 503, DefaultCredentialsError
+docker stop gx-bare
+```
+This is the important distinction: a liveness probe that called GCP would restart containers
+whenever Google had a bad minute. A misconfigured instance should stop taking traffic without
+being restart-looped.
+
+### No credentials in the image
+
+```bash
+docker run --rm --entrypoint sh gcp-explorer -c \
+    'ls /app/*credentials*.json /app/.env 2>/dev/null || echo "clean"'
+```
+CI runs this too. A key copied into an image is in every layer and every registry that holds
+it, and deleting it in a later layer does not remove it.
+
+## 14. The API, end to end
 
 ```bash
 uv run gcp-explorer serve

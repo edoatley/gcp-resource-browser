@@ -16,6 +16,7 @@ from rich.table import Table
 
 from app import core
 from app.aggregate import summarise
+from app.fanout import DEFAULT_MAX_CONCURRENCY, search_scopes
 from app.output import OutputFormat, to_csv, to_json
 from app.params import DEFAULT_LIMIT, Help, SearchFilters
 
@@ -29,6 +30,9 @@ EXIT_PERMISSION = 3
 EXIT_NOT_FOUND = 4
 EXIT_UPSTREAM = 5
 EXIT_NOT_CONFIGURED = 6
+# Some scopes answered and some failed. Distinct from success, because a
+# partial answer must not be mistaken for a complete one by a script.
+EXIT_PARTIAL = 7
 
 _EXIT_BY_ERROR: dict[type[core.ResourceExplorerError], int] = {
     core.UnknownResourceTypeError: EXIT_USAGE,
@@ -44,6 +48,40 @@ _EXIT_BY_ERROR: dict[type[core.ResourceExplorerError], int] = {
 def _fail(exc: core.ResourceExplorerError) -> typer.Exit:
     err_console.print(f"[red]Error:[/red] {exc}")
     return typer.Exit(code=_EXIT_BY_ERROR.get(type(exc), 1))
+
+
+def _search_many(
+    scopes: list[str],
+    filters: SearchFilters,
+    max_concurrency: int,
+    output: OutputFormat,
+    show_query: bool,
+) -> None:
+    """Search several scopes concurrently and render the merged result."""
+    try:
+        with console.status(f"Searching {len(scopes)} scopes..."):
+            merged = search_scopes(scopes, filters, max_concurrency=max_concurrency)
+    except core.ResourceExplorerError as exc:
+        raise _fail(exc) from exc
+
+    if output is not OutputFormat.TABLE:
+        _emit(merged.resources, output)
+    else:
+        if show_query and merged.query:
+            console.print(f"[dim]CAI query: {merged.query}[/dim]")
+        if merged.resources:
+            _render_table(merged.resources, f"GCP resources across {len(scopes)} scopes")
+        else:
+            console.print("[yellow]No resources found.[/yellow]")
+        if merged.suppressed:
+            console.print(f"[dim]{merged.suppressed} hidden. Use --show-all.[/dim]")
+
+    # Failures are never silent: a partial answer that looks complete would
+    # under-report the estate, which is the failure this tool exists to prevent.
+    for failed_scope, reason in sorted(merged.failures.items()):
+        err_console.print(f"[red]FAILED[/red] {failed_scope}: {reason}")
+    if merged.failures:
+        raise typer.Exit(code=EXIT_PARTIAL)
 
 
 def _emit(resources: list, output: OutputFormat) -> None:
@@ -103,6 +141,10 @@ def _render(result: core.SearchResult, scope: str, title: str, show_query: bool)
             console.print(f"[dim]Query sent was: {result.query}[/dim]")
         return
 
+    _render_table(result.resources, title)
+
+
+def _render_table(resources: list, title: str) -> None:
     table = Table(title=title)
     # Sized to content rather than fixed ratios. The previous no_wrap on the
     # name column starved the others down to ellipses ("7340775...", "Service...")
@@ -112,7 +154,7 @@ def _render(result: core.SearchResult, scope: str, title: str, show_query: bool)
     table.add_column("Project", style="magenta")
     table.add_column("Location", style="green")
 
-    for item in result.resources:
+    for item in resources:
         table.add_row(
             item.display_name or item.full_name,
             # The asset type's short half; the domain is noise in a table.
@@ -146,11 +188,39 @@ def search(
     output: OutputFormat = typer.Option(
         OutputFormat.TABLE, "--output", "-o", help=Help.OUTPUT
     ),
+    also_scope: list[str] = typer.Option(
+        [],
+        "--also-scope",
+        help="Additional scope to search concurrently; repeatable",
+    ),
+    max_concurrency: int = typer.Option(
+        DEFAULT_MAX_CONCURRENCY, "--max-concurrency", min=1, help=Help.MAX_CONCURRENCY
+    ),
+    cache_ttl: float = typer.Option(0.0, "--cache-ttl", min=0, help=Help.CACHE_TTL),
 ) -> None:
     """Search resources across a scope, with filters applied server-side.
 
     With no --type, searches every asset type and hides low-signal resources.
     """
+    filters = SearchFilters(
+        scope=scope,
+        resource_types=resource_type,
+        free_text=term,
+        labels=label,
+        locations=location,
+        projects=project,
+        raw_query=raw_query,
+        limit=limit,
+        show_all=show_all,
+        sort=sort,
+        include_iam=include_iam,
+        cache_ttl=cache_ttl,
+    )
+
+    if also_scope:
+        _search_many([scope, *also_scope], filters, max_concurrency, output, show_query)
+        return
+
     try:
         with console.status(f"Searching {scope}..."):
             result = core.search_resources(

@@ -72,6 +72,11 @@ class Help:
         "Attach each resource's directly-attached IAM bindings. One extra call for the "
         "whole scope. Inherited bindings are not included."
     )
+    CACHE_TTL = (
+        "Seconds to cache identical searches. 0 (the default) disables it -- an audit "
+        "tool should not answer from a stale cache unless asked to."
+    )
+    MAX_CONCURRENCY = "Maximum concurrent scope searches when several scopes are given"
     SHOW_ALL = (
         "Include resources hidden by default (enabled API services, image layers, "
         "auto-created default routes and subnets, and similar)"
@@ -98,3 +103,4 @@ class SearchFilters:
     show_all: bool = False
     sort: Sequence[str] = field(default_factory=tuple)
     include_iam: bool = False
+    cache_ttl: float = 0.0

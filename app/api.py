@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI, Query
 from fastapi.requests import Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from app import core
 from app.aggregate import summarise
@@ -86,6 +86,7 @@ def search_resources(
     show_all: bool = Query(default=False, description=Help.SHOW_ALL),
     sort: list[str] = Query(default_factory=list, description=Help.SORT, examples=[["name"]]),
     include_iam: bool = Query(default=False, description=Help.INCLUDE_IAM),
+    cache_ttl: float = Query(default=0.0, ge=0, le=3600, description=Help.CACHE_TTL),
 ) -> ResourceList:
     result = core.search_resources(
         SearchFilters(
@@ -100,6 +101,7 @@ def search_resources(
             show_all=show_all,
             sort=sort,
             include_iam=include_iam,
+            cache_ttl=cache_ttl,
         )
     )
     return ResourceList(
@@ -113,6 +115,48 @@ def search_resources(
         iam_note=result.iam_note,
         data=result.resources,
     )
+
+
+@app.get(
+    "/v1/resources/stream",
+    summary="Stream resources as newline-delimited JSON",
+    response_class=StreamingResponse,
+)
+def stream_resources(
+    scope: str = Query(description=Help.SCOPE, examples=["organizations/123"]),
+    type: list[str] = Query(default_factory=list, description=Help.TYPE),
+    q: str = Query(default="", description=Help.TERM),
+    label: list[str] = Query(default_factory=list, description=Help.LABEL),
+    location: list[str] = Query(default_factory=list, description=Help.LOCATION),
+    project: list[str] = Query(default_factory=list, description=Help.PROJECT),
+    limit: int | None = Query(default=None, ge=1, description=Help.LIMIT),
+    show_all: bool = Query(default=False, description=Help.SHOW_ALL),
+    sort: list[str] = Query(default_factory=list, description=Help.SORT),
+) -> StreamingResponse:
+    """One JSON object per line, emitted as CAI returns them.
+
+    For result sets large enough that waiting for the whole payload is worse
+    than parsing incrementally. Unlike `/v1/resources` this does not report
+    suppression counts -- they are not known until the stream ends, and a
+    trailer would be missed by most clients. Use `/v1/summary` for totals.
+    """
+    filters = SearchFilters(
+        scope=scope,
+        resource_types=type,
+        free_text=q,
+        labels=label,
+        locations=location,
+        projects=project,
+        limit=limit,
+        show_all=show_all,
+        sort=sort,
+    )
+
+    def lines():
+        for resource in core.stream_resources(filters):
+            yield resource.model_dump_json(exclude_none=True) + "\n"
+
+    return StreamingResponse(lines(), media_type="application/x-ndjson")
 
 
 @app.get(

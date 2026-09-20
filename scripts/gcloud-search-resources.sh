@@ -10,10 +10,11 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-usage: gcloud-search-resources.sh --scope SCOPE --type TYPE [options]
+usage: gcloud-search-resources.sh --scope SCOPE [options]
 
   --scope SCOPE       organizations/<id>, folders/<id>, or projects/<id>
-  --type TYPE         friendly name or raw CAI type; repeatable
+  --type TYPE         friendly name or raw CAI type; repeatable.
+                      Omit to search every type.
   --term TEXT         free-text term
   --label key=value   repeatable; bare `key` matches any value
   --location LOC      repeatable; several are ORed
@@ -33,7 +34,7 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown argument: $1" >&2; usage ;;
   esac
 done
-[[ -n "$SCOPE" && ${#TYPES[@]} -gt 0 ]] || usage
+[[ -n "$SCOPE" ]] || usage
 
 # Friendly name -> CAI asset type, read from the same file app/core.py loads,
 # so the mapping cannot drift between the tool and this check. Anything absent
@@ -47,8 +48,10 @@ resolve_type() {
   echo "${resolved:-$1}"
 }
 
+# No --type means every type: gcloud omits --asset-types entirely, matching the
+# tool's behaviour when asset_types is empty.
 asset_types=""
-for t in "${TYPES[@]}"; do
+for t in "${TYPES[@]+"${TYPES[@]}"}"; do
   resolved="$(resolve_type "$t")"
   asset_types="${asset_types:+$asset_types,}$resolved"
 done
@@ -98,7 +101,8 @@ except OSError:
 " 2>/dev/null
 )}"
 
-args=(--scope="$SCOPE" --asset-types="$asset_types" --format=json)
+args=(--scope="$SCOPE" --format=json)
+[[ -n "$asset_types" ]] && args+=(--asset-types="$asset_types")
 [[ -n "$QUERY" ]] && args+=(--query="$QUERY")
 [[ -n "$BILLING_PROJECT" ]] && args+=(--billing-project="$BILLING_PROJECT")
 

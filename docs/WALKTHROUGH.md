@@ -97,7 +97,41 @@ uv run gcp-explorer search projects/gcp-sandbox-2026-18798 \
 ```
 Expect 5 rows plus a warning that more exist.
 
-## 8. The differential check — the one that matters
+## 8. Query everything, with noise reduction (Phase 3)
+
+```bash
+# No --type: every asset type, low-signal resources hidden
+uv run gcp-explorer search projects/gcp-sandbox-2026-18798 --limit 8
+
+# The same search with nothing hidden — note the volume difference
+uv run gcp-explorer search projects/gcp-sandbox-2026-18798 --show-all --limit 8
+
+# A project where almost everything is noise: must say so, not claim emptiness
+uv run gcp-explorer search projects/ace-gcp-training
+```
+
+Expect a `N hidden: ...` line naming the top reasons on the first and third, and none on the
+second. Measured across the estate: 515 resources become 84.
+
+The third is the important one — `ace-gcp-training` has 28 resources of which 27 are enabled
+APIs and system log sinks. It must report what it hid, never a bare "No resources found".
+
+```bash
+# --limit counts VISIBLE results, not fetched rows
+uv run gcp-explorer search projects/gcp-sandbox-2026-18798 --limit 3
+```
+Expect exactly 3 real resources, despite ~119 noise rows being skipped to find them.
+
+## 9. Noise reduction only ever removes
+
+```bash
+./scripts/check-noise.sh projects/gcp-sandbox-2026-18798
+./scripts/check-noise.sh projects/sudoku-eo-2026
+```
+Asserts the suppressed result is a strict subset of the full one. Verified: 11 of 130 (91%
+hidden) and 33 of 123 (73% hidden), both strict subsets.
+
+## 10. The differential check — the one that matters
 
 ```bash
 ./scripts/compare-resources.sh --scope projects/sudoku-eo-2026 --type cloudrun
@@ -106,11 +140,17 @@ Expect 5 rows plus a warning that more exist.
     --label cloud.googleapis.com/location=us-central1
 ./scripts/compare-resources.sh --scope projects/idp-prototype-edo --type bucket --term tfstate
 ./scripts/compare-resources.sh --scope projects/sudoku-app-eo --type dns.googleapis.com/ManagedZone
+
+# No --type: the whole unfiltered fetch, compared against gcloud
+./scripts/compare-resources.sh --scope projects/idp-prototype-edo
 ```
-Verified results: 2, 46, 2, 1 and 1 resources respectively — all `MATCH`. This is the only check that validates the
+Verified results: 2, 46, 2, 1, 1 and 28 resources respectively — all `MATCH`.
+
+Note this compares with suppression **off**. gcloud has no notion of noise reduction, so
+including it would compare two different questions; step 9 covers that property instead. This is the only check that validates the
 *query itself* — unit tests fake the client, so they can only prove we sent what we intended.
 
-## 9. The API
+## 11. The API
 
 ```bash
 uv run gcp-explorer serve
@@ -121,5 +161,11 @@ curl 'http://127.0.0.1:8000/v1/resources?scope=projects/sudoku-eo-2026&type=clou
 curl -s -o /dev/null -w '%{http_code}\n' \
     'http://127.0.0.1:8000/v1/resources?scope=projects/sudoku-eo-2026&type=nonsense'   # 400
 curl 'http://127.0.0.1:8000/v1/types' | jq 'keys | length'                             # 20
+
+# No type param: everything, with suppression reported in the body
+curl 'http://127.0.0.1:8000/v1/resources?scope=projects/ace-gcp-training' \
+    | jq '{count, suppressed, suppressed_summary}'
+curl 'http://127.0.0.1:8000/v1/resources?scope=projects/ace-gcp-training&show_all=true' \
+    | jq '{count, suppressed}'
 open http://127.0.0.1:8000/docs
 ```

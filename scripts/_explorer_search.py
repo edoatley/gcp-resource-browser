@@ -24,6 +24,14 @@ def main() -> int:
     parser.add_argument("--label", dest="labels", action="append", default=[])
     parser.add_argument("--location", dest="locations", action="append", default=[])
     parser.add_argument("--project", dest="projects", action="append", default=[])
+    parser.add_argument(
+        "--suppress-noise",
+        action="store_true",
+        help=(
+            "Apply noise reduction. Off by default: gcloud has no equivalent, so the "
+            "comparison must be of what CAI returned, not of what we chose to display."
+        ),
+    )
     args = parser.parse_args()
 
     try:
@@ -36,6 +44,7 @@ def main() -> int:
                 locations=args.locations,
                 projects=args.projects,
                 limit=None,
+                show_all=not args.suppress_noise,
             )
         )
     except core.ResourceExplorerError as exc:
@@ -43,6 +52,8 @@ def main() -> int:
         return 1
 
     print(f"explorer query: {result.query or '<none>'}", file=sys.stderr)
+    if result.suppressed:
+        print(f"explorer suppressed: {result.suppressed}", file=sys.stderr)
     for resource in result.resources:
         print(
             json.dumps(

@@ -21,6 +21,7 @@ SHARED_FILTERS = [
     ("project", "project"),
     ("raw_query", "raw_query"),
     ("limit", "limit"),
+    ("show_all", "show_all"),
 ]
 
 
@@ -53,6 +54,7 @@ def test_shared_help_text_comes_from_one_source() -> None:
         ("project", "project"): Help.PROJECT,
         ("raw_query", "raw_query"): Help.RAW_QUERY,
         ("limit", "limit"): Help.LIMIT,
+        ("show_all", "show_all"): Help.SHOW_ALL,
     }
     for (cli_name, api_name), text in shared.items():
         assert text in _cli_help(cli_name), f"CLI {cli_name} drifted from Help"

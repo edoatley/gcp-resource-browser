@@ -44,8 +44,10 @@ the user runs `gcloud auth application-default login` first. This is a deliberat
 - `app/core.py` — the only module that talks to GCP. `search_resources` wraps CAI's
   `search_all_resources`, flattens hits into Pydantic models, and translates
   `google.api_core` exceptions into the domain errors declared there.
+- `app/query.py` — compiles filters into CAI query syntax. See the warning below.
 - `app/models.py` — `Resource`, `ResourceList`, `ErrorResponse`.
-- `app/api.py` — FastAPI. `GET /v1/resources?scope=&type=&q=&limit=`.
+- `app/api.py` — FastAPI. `GET /v1/resources` (repeatable `type`, `label`, `location`,
+  `project`), `GET /v1/types`.
 - `app/cli.py` — Typer + `rich`. `serve` runs uvicorn against the same FastAPI app, so CLI and
   API are one process and one deployable.
 - `app/main.py` — thin entry shim for `python -m app.main`.
@@ -78,6 +80,15 @@ reduction" filter bypassed via `--show-all` / `?show_all=true`; label/region fil
 cross-project search; aggregated endpoints. **Check `docs/DELIVERY_PLAN.md` before assuming a
 missing feature is out of scope** — it phases this work and records the sequencing rationale. Keep its checkboxes
 current as phases land, and keep the status note near the top of `README.md` in step.
+
+**`app/query.py` is the highest-risk code here.** Filters are compiled into CAI query syntax
+and evaluated server-side — never filtered locally, which would mean fetching an org-wide
+result set to discard most of it. A filter that compiles to *valid but wrong* syntax returns a
+plausible result set quietly missing rows, which is worse than an error because it does not
+announce itself. Preserve both guards when adding filters: values go through `quote()` so they
+can never alter the query's structure, and the compiled query stays recoverable (`query` in the
+API response, `--show-query` on the CLI, shown automatically on an empty filtered result). New
+filters need a test pinning the exact compiled string, and a `scripts/` equivalent.
 
 Results are capped (`DEFAULT_LIMIT`, 1000) so an org-wide search cannot run away. When the cap
 bites, both surfaces say so — `truncated` in the API body, a warning line in the CLI. Keep that

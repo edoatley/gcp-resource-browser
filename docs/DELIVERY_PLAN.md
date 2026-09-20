@@ -76,24 +76,62 @@ required single type. Making type optional is Phase 3; accepting several is Phas
 
 ---
 
-## Phase 2 — Search and filtering depth ☐
+## Phase 2 — Search and filtering depth ☑
 
 **Goal:** deliver the PRD's "Global Search" and "Rich Filtering" objectives.
 
-- ☐ Free-text name search across a scope (`gcp-explorer search <scope> <term>`), built on CAI's
-  `query` parameter — this is the PRD's headline "find a VM by name across 2000 projects"
-  use case, and CAI already answers it in one call.
-- ☐ `--label key=value` (repeatable), `--location`/`--region`, and `--project` filters,
-  compiled into CAI query syntax (`labels.env=prod`, `location:europe-west2`) rather than
-  filtered client-side, so the work stays server-side.
-- ☐ Accept multiple resource types in one request (`--type bucket --type cloudrun`).
-- ☐ Broaden `ASSET_TYPES` beyond the current two, and add a `gcp-explorer types` command that
-  lists supported friendly names. Accept raw CAI asset type strings as a pass-through so the
-  mapping is never a hard limit.
-- ☐ Mirror every filter as an API query parameter.
+- ☑ Free-text search: `gcp-explorer search <scope> <term>`, built on CAI's `query` parameter —
+  the PRD's headline "find a resource by name across 2000 projects" case, answered in one call.
+- ☑ `--label key=value` (repeatable, plus bare `--label key` for "has this label"),
+  `--location` and `--project` (repeatable, ORed), all compiled into CAI query syntax and
+  evaluated **server-side**. Filtering client-side would mean fetching an org-wide result set
+  to discard most of it — the scaling failure the tool exists to avoid.
+- ☑ Multiple resource types in one request (`--type bucket --type vm`), sent as a single
+  upstream call rather than one per type.
+- ☑ `ASSET_TYPES` broadened from 2 to 20 friendly names, plus raw CAI asset types and RE2
+  patterns accepted as pass-through, so the mapping is a convenience rather than a hard limit.
+- ☑ `gcp-explorer types` / `GET /v1/types` list the mapping.
+- ☑ Every filter mirrored as an API query parameter.
+- ☑ `--raw-query` / `?raw_query=` for CAI syntax not yet modelled (`NOT state:ACTIVE`,
+  `createTime<...`), ANDed with the rest.
 
-**Exit criteria:** a single CLI invocation finds a named resource across an org scope and
-filters it by label and region.
+### Query construction is the risk, and is isolated
+
+`app/query.py` exists as its own module because it is the highest-risk code in the project: a
+filter that compiles to *valid but wrong* syntax returns a plausible result set that is quietly
+missing rows. In an audit tool that is the worst failure mode — worse than an error, which at
+least announces itself.
+
+Two mitigations, both of which should be preserved as filters grow:
+
+1. **Values are quoted defensively.** A value carrying a space, a parenthesis, or a bare `OR`
+   would otherwise change the *structure* of the query rather than the value being matched.
+   Safe values stay bare so CAI's `*` wildcards keep working; anything else is quoted and
+   escaped. Tested, including a deliberate injection attempt.
+2. **The compiled query is echoed back** — `query` in the API response, `--show-query` on the
+   CLI, and automatically on an empty CLI result. An empty result with filters applied is
+   otherwise ambiguous: nothing matched, or the filter compiled to something unintended. The
+   user must be able to tell which.
+
+### Verified facts that shaped this phase
+
+- `page_size` is capped at **500 server-side** regardless of what is requested, so
+  `DEFAULT_PAGE_SIZE` sits at the ceiling.
+- `asset_types` accepts **RE2 patterns**; a pattern matching no supported type returns
+  `INVALID_ARGUMENT`, which is why that error now maps to `InvalidFilterError` rather than
+  `InvalidScopeError`.
+- Query terms are space-separated for AND, with `field:(a OR b)` for alternation. `field:value`
+  is word-contains; `field=value` is exact.
+
+**Needs verification against a live API:** the `project:` query field used by `--project` is
+modelled on CAI's searchable-field set but is not demonstrated in the request docstring's
+examples. `scripts/compare-resources.sh` will confirm or refute it on first real run against a
+project with resources. If it proves wrong, the filter is the only thing that changes — the
+compiler and both surfaces are unaffected.
+
+**Deferred to Phase 3:** `--type` is still required. Making it optional is coupled to noise
+reduction, not independent of it: searching every asset type across an organisation without a
+noise filter returns something unusable, so the two ship together.
 
 ---
 
@@ -102,7 +140,9 @@ filters it by label and region.
 **Goal:** the PRD's resolved decision that the tool queries *all* resource types by default and
 hides low-value noise unless asked.
 
-- ☐ Make `asset_types` optional — omitting it searches everything in scope.
+- ☐ Make `asset_types` optional — omitting it searches everything in scope. Coupled to the
+  noise filter below: without it, an org-wide all-types search is unusable, which is why
+  Phase 2 left `--type` required.
 - ☐ Noise-reduction ruleset (default-suppressed asset types: standard IAM roles, default network
   routes, system-managed and auto-created resources), defined as data in one place so it is
   reviewable and testable rather than scattered through call sites.

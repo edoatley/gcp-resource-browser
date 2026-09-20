@@ -7,9 +7,9 @@ too quota-hungry to be viable.
 - **[PRD](docs/PRD.md)** — requirements and the recorded architecture decisions.
 - **[Delivery plan](docs/DELIVERY_PLAN.md)** — phased breakdown of what ships when.
 
-> **Status: early.** Phases 0–1 are complete: typed models, real status codes, explicit limits,
-> and a test suite. Two resource types are supported and filtering is not yet implemented
-> (Phase 2). See the delivery plan for what is coming.
+> **Status: usable.** Phases 0–2 are complete: free-text search, label/location/project
+> filtering compiled server-side, 20 resource types plus raw CAI types. Searching *all* types
+> with noise reduction is Phase 3. See the delivery plan for what is coming.
 
 ## Requirements
 
@@ -35,26 +35,45 @@ unchanged under a service account in CI or a container.
 ### CLI
 
 ```bash
-# List buckets in a project
+# Find a resource by name across an entire organisation — one API call, not 2000
+uv run gcp-explorer search organizations/123456789 backup --type bucket
+
+# Several types, several filters. Filters are evaluated by CAI, not locally.
+uv run gcp-explorer search organizations/123456789 \
+    --type bucket --type vm \
+    --label env=prod \
+    --location europe-west2 --location europe-west1
+
+# Resources carrying an `owner` label at all, whatever its value
+uv run gcp-explorer search folders/456 --type vm --label owner
+
+# Raw CAI syntax for anything not modelled as a flag
+uv run gcp-explorer search projects/my-project --type vm --raw-query 'NOT state:RUNNING'
+
+# Show the CAI query the filters compiled to
+uv run gcp-explorer search projects/my-project --type bucket --label env=prod --show-query
+
+# Single-type shorthand
 uv run gcp-explorer list-resources projects/my-project bucket
 
-# List Cloud Run services across an entire organisation — one API call, not 2000
-uv run gcp-explorer list-resources organizations/123456789 cloudrun
-
-# Free-text filter and a raised result cap
-uv run gcp-explorer list-resources folders/456 bucket --query name:backup --limit 5000
-
+uv run gcp-explorer types      # list supported type names
 uv run gcp-explorer --help
 ```
 
 `scope` is any CAI scope: `projects/<id>`, `folders/<id>`, or `organizations/<id>`.
-`resource_type` is currently `bucket` or `cloudrun`.
+
+**Types:** 20 friendly names (`uv run gcp-explorer types`), or any raw CAI asset type
+(`dns.googleapis.com/ManagedZone`) or RE2 pattern (`compute.googleapis.com/.*`).
+
+**Filters** combine as you would expect: different kinds are ANDed, repeated values of the same
+kind are ORed. `--label env=prod --label tier=web` means both; `--location a --location b` means
+either.
 
 Results are capped at 1000 by default so an org-wide search cannot run away; when the cap
 bites, the CLI says so rather than silently returning a short list. Raise it with `--limit`.
 
-**Exit codes:** `0` success · `2` bad usage (unknown type, malformed scope) · `3` permission
-denied · `4` scope not found · `5` upstream CAI failure.
+**Exit codes:** `0` success · `2` bad usage (unknown type, malformed scope or filter) · `3`
+permission denied · `4` scope not found · `5` upstream CAI failure.
 
 ### HTTP API
 
@@ -64,19 +83,25 @@ uv run gcp-explorer serve      # http://127.0.0.1:8000
 
 | Endpoint | Description |
 |:---|:---|
-| `GET /v1/resources?scope=&type=&q=&limit=` | Search a scope for resources of one type |
+| `GET /v1/resources?scope=&type=&q=&label=&location=&project=&limit=` | Search a scope; `type`, `label`, `location` and `project` are repeatable |
+| `GET /v1/types` | Friendly type names mapped to CAI asset types |
 | `GET /healthz` | Liveness probe |
 | `GET /docs` | Swagger UI (auto-generated) |
 | `GET /openapi.json` | OpenAPI schema |
 
 ```bash
 curl 'http://127.0.0.1:8000/v1/resources?scope=projects/my-project&type=bucket'
+
+# Repeat a parameter to search several types, or to OR several locations
+curl 'http://127.0.0.1:8000/v1/resources?scope=organizations/123\
+&type=bucket&type=vm&label=env%3Dprod&location=europe-west2&location=global'
 ```
 
 ```json
 {
   "scope": "projects/my-project",
-  "asset_type": "storage.googleapis.com/Bucket",
+  "asset_types": ["storage.googleapis.com/Bucket"],
+  "query": "labels.env:prod",
   "count": 1,
   "truncated": false,
   "data": [
@@ -123,11 +148,23 @@ Three layers:
 
 1. **Core** (`app/core.py`) — the only module that talks to GCP. `search_resources` calls CAI's
    `search_all_resources`, flattens each hit into a Pydantic `Resource`, and translates Google
-   exceptions into domain errors.
+   exceptions into domain errors. `app/query.py` compiles filters into CAI query syntax.
 2. **CLI** (`app/cli.py`) — renders a `rich` table, maps domain errors to exit codes.
 3. **API** (`app/api.py`) — returns JSON, maps domain errors to status codes.
 
 `app/models.py` holds the shared Pydantic models; `app/main.py` is a thin entry shim.
+
+### Filtering happens server-side
+
+Filters compile into a CAI query string and are evaluated by CAI. Nothing is filtered locally:
+fetching an org-wide result set to discard most of it is the scaling failure this tool exists
+to avoid.
+
+That makes `app/query.py` the highest-risk code here — a filter compiling to *valid but wrong*
+syntax returns a plausible result set quietly missing rows, which is worse than an error
+because it does not announce itself. Two guards: values are quoted so they can never alter the
+query's structure, and the compiled query is always recoverable (`query` in the API response,
+`--show-query` on the CLI, and shown automatically when a filtered search returns nothing).
 
 Both wrappers are deliberately thin. New capability belongs in the core function so the CLI and
 API never drift apart. `serve` runs uvicorn against the same FastAPI object, so there is one
@@ -178,11 +215,16 @@ one that filters client-side when it should filter server-side, or quietly misse
 `scripts/` holds `gcloud` equivalents and a differential checker for that:
 
 ```bash
-./scripts/compare-resources.sh projects/my-project bucket
+./scripts/compare-resources.sh --scope projects/my-project --type bucket
+
+./scripts/compare-resources.sh --scope organizations/123 \
+    --type bucket --type vm --label env=prod --location europe-west2
 ```
 
 It diffs the tool's output against `gcloud asset search-all-resources` and exits non-zero if
-they disagree. Every new capability should ship with an equivalent here.
+they disagree. The gcloud side builds its query with its own independent logic — comparing the
+tool's query against itself would prove nothing. Every new capability should ship with an
+equivalent here.
 
 Code lives in `app/`, which does not match the project name, so `pyproject.toml` names the
 package explicitly under `[tool.hatch.build.targets.wheel]`. Without that, `uv sync` fails at

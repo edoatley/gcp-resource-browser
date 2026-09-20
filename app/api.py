@@ -18,6 +18,9 @@ from fastapi.responses import JSONResponse
 from app import core
 from app.models import ErrorResponse, ResourceList
 
+# Precomputed for the OpenAPI descriptions below, which are evaluated at import.
+_TYPE_NAMES = ", ".join(sorted(core.ASSET_TYPES))
+
 app = FastAPI(
     title="GCP Resource Explorer API",
     description=(
@@ -31,6 +34,7 @@ app = FastAPI(
 _STATUS_BY_ERROR: dict[type[core.ResourceExplorerError], int] = {
     core.UnknownResourceTypeError: 400,
     core.InvalidScopeError: 400,
+    core.InvalidFilterError: 400,
     core.ScopeAccessDenied: 403,
     core.ScopeNotFound: 404,
     core.UpstreamError: 502,
@@ -51,11 +55,8 @@ def handle_explorer_error(request: Request, exc: core.ResourceExplorerError) -> 
     "/v1/resources",
     response_model=ResourceList,
     responses={
-        400: {"model": ErrorResponse, "description": "Unknown resource type or malformed scope"},
-        403: {
-            "model": ErrorResponse,
-            "description": "Caller lacks Cloud Asset Viewer on the scope",
-        },
+        400: {"model": ErrorResponse, "description": "Unknown type, malformed scope or filter"},
+        403: {"model": ErrorResponse, "description": "Caller lacks Cloud Asset Viewer"},
         404: {"model": ErrorResponse, "description": "Scope not found"},
         502: {"model": ErrorResponse, "description": "Cloud Asset Inventory call failed"},
     },
@@ -66,25 +67,63 @@ def search_resources(
         description="CAI scope: organizations/<id>, folders/<id>, or projects/<id>",
         examples=["projects/my-project"],
     ),
-    type: str = Query(
-        description=f"Resource type. One of: {', '.join(sorted(core.ASSET_TYPES))}",
-        examples=["bucket"],
+    type: list[str] = Query(
+        description=(
+            f"Resource type, repeatable. A friendly name ({_TYPE_NAMES}), "
+            "a raw CAI asset type, or an RE2 pattern."
+        ),
+        examples=[["bucket"]],
     ),
-    q: str = Query(default="", description="Free-text CAI query filter"),
+    q: str = Query(default="", description="Free-text term matched across searchable fields"),
+    label: list[str] = Query(
+        default_factory=list,
+        description="Label filter, repeatable: `key=value`, or `key` for any value",
+        examples=[["env=prod"]],
+    ),
+    location: list[str] = Query(
+        default_factory=list,
+        description="Location filter, repeatable; several are ORed. Supports `*` wildcards.",
+        examples=[["europe-west2"]],
+    ),
+    project: list[str] = Query(
+        default_factory=list,
+        description="Project filter, repeatable; several are ORed",
+    ),
+    raw_query: str = Query(
+        default="", description="Raw CAI query syntax, ANDed with the other filters"
+    ),
     limit: int = Query(
         default=core.DEFAULT_LIMIT, ge=1, le=10_000, description="Maximum resources to return"
     ),
 ) -> ResourceList:
-    resources, truncated = core.search_resources(
-        scope=scope, resource_type=type, query=q, limit=limit
+    result = core.search_resources(
+        scope=scope,
+        resource_types=type,
+        free_text=q,
+        labels=label,
+        locations=location,
+        projects=project,
+        raw_query=raw_query,
+        limit=limit,
     )
     return ResourceList(
         scope=scope,
-        asset_type=core.ASSET_TYPES[type],
-        count=len(resources),
-        truncated=truncated,
-        data=resources,
+        asset_types=result.asset_types,
+        query=result.query,
+        count=len(result.resources),
+        truncated=result.truncated,
+        data=result.resources,
     )
+
+
+@app.get("/v1/types", summary="List supported resource-type names")
+def list_types() -> dict[str, str]:
+    """Friendly names mapped to CAI asset types.
+
+    Raw CAI asset types are accepted anywhere a friendly name is, so this is a
+    convenience listing rather than the set of what can be searched.
+    """
+    return dict(sorted(core.ASSET_TYPES.items()))
 
 
 @app.get("/healthz", summary="Liveness probe", include_in_schema=False)

@@ -39,7 +39,13 @@ class ResourceList(BaseModel):
     """Envelope returned by a resource search."""
 
     scope: str = Field(description="Scope searched, e.g. projects/my-project")
-    asset_type: str = Field(description="CAI asset type that was searched for")
+    asset_types: list[str] = Field(description="CAI asset types that were searched")
+    query: str = Field(
+        description=(
+            "The Cloud Asset Inventory query the filters compiled to. Echoed back so a "
+            "filter that compiles to something unintended is visible rather than silent."
+        )
+    )
     count: int = Field(description="Number of resources in `data`")
     truncated: bool = Field(
         description="True when `limit` cut the result set short and more resources exist"

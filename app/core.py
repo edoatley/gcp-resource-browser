@@ -12,24 +12,53 @@ from __future__ import annotations
 
 import itertools
 import re
+from collections.abc import Sequence
+from dataclasses import dataclass
 from functools import lru_cache
 
 from google.api_core import exceptions as gcp_exceptions
 from google.cloud import asset_v1
 
 from app.models import Resource
+from app.query import QueryError, build_query
 
 # Friendly names mapped to CAI asset types. One entry lights up both the CLI
-# and the API, since both validate against this dict.
+# and the API, since both resolve through this dict. Not a hard limit: any raw
+# CAI asset type (or RE2 pattern) is accepted as a pass-through, so an absent
+# entry is a convenience gap rather than a blocker.
 ASSET_TYPES: dict[str, str] = {
     "bucket": "storage.googleapis.com/Bucket",
     "cloudrun": "run.googleapis.com/Service",
+    "vm": "compute.googleapis.com/Instance",
+    "disk": "compute.googleapis.com/Disk",
+    "network": "compute.googleapis.com/Network",
+    "subnet": "compute.googleapis.com/Subnetwork",
+    "firewall": "compute.googleapis.com/Firewall",
+    "address": "compute.googleapis.com/Address",
+    "forwardingrule": "compute.googleapis.com/ForwardingRule",
+    "gke": "container.googleapis.com/Cluster",
+    "function": "cloudfunctions.googleapis.com/CloudFunction",
+    "sql": "sqladmin.googleapis.com/Instance",
+    "spanner": "spanner.googleapis.com/Instance",
+    "topic": "pubsub.googleapis.com/Topic",
+    "subscription": "pubsub.googleapis.com/Subscription",
+    "dataset": "bigquery.googleapis.com/Dataset",
+    "table": "bigquery.googleapis.com/Table",
+    "secret": "secretmanager.googleapis.com/Secret",
+    "serviceaccount": "iam.googleapis.com/ServiceAccount",
+    "project": "cloudresourcemanager.googleapis.com/Project",
 }
+
+# A raw CAI asset type looks like "storage.googleapis.com/Bucket". Anything
+# containing a dot or a slash is treated as a raw type or RE2 pattern and
+# passed through untouched; bare words must resolve via ASSET_TYPES.
+_RAW_ASSET_TYPE = re.compile(r"[./]")
 
 # CAI accepts an organization, folder, or project as a search scope.
 SCOPE_PATTERN = re.compile(r"^(organizations|folders|projects)/[a-zA-Z0-9][a-zA-Z0-9\-_.]*$")
 
-# Results returned per upstream page. Tuning knob, not a cap on total results.
+# Results per upstream page. CAI caps this at 500 server-side regardless of
+# what is asked, so this sits at the ceiling. Tuning knob, not a cap on totals.
 DEFAULT_PAGE_SIZE = 500
 
 # Default ceiling on total results, so an unqualified org-wide search cannot
@@ -52,6 +81,10 @@ class InvalidScopeError(ResourceExplorerError):
     code = "invalid_scope"
 
 
+class InvalidFilterError(ResourceExplorerError):
+    code = "invalid_filter"
+
+
 class ScopeAccessDenied(ResourceExplorerError):
     code = "permission_denied"
 
@@ -62,6 +95,16 @@ class ScopeNotFound(ResourceExplorerError):
 
 class UpstreamError(ResourceExplorerError):
     code = "upstream_error"
+
+
+@dataclass(frozen=True)
+class SearchResult:
+    """What a search returned, plus how it was asked."""
+
+    resources: list[Resource]
+    truncated: bool
+    query: str
+    asset_types: list[str]
 
 
 @lru_cache(maxsize=1)
@@ -76,14 +119,37 @@ def get_client() -> asset_v1.AssetServiceClient:
 
 
 def resolve_asset_type(resource_type: str) -> str:
-    """Map a friendly name to a CAI asset type, or raise."""
+    """Map a friendly name to a CAI asset type, or pass a raw type through."""
+    if _RAW_ASSET_TYPE.search(resource_type):
+        # Raw CAI type or RE2 pattern. CAI rejects a pattern matching nothing
+        # with INVALID_ARGUMENT, which surfaces as InvalidScopeError.
+        return resource_type
     try:
         return ASSET_TYPES[resource_type]
     except KeyError:
         raise UnknownResourceTypeError(
             f"Unsupported resource type {resource_type!r}. "
-            f"Choose from: {', '.join(sorted(ASSET_TYPES))}"
+            f"Choose from: {', '.join(sorted(ASSET_TYPES))}, "
+            "or pass a raw CAI asset type such as storage.googleapis.com/Bucket."
         ) from None
+
+
+def resolve_asset_types(resource_types: Sequence[str]) -> list[str]:
+    """Resolve several types, preserving order and dropping duplicates."""
+    if isinstance(resource_types, str):
+        # A bare str satisfies Sequence[str] and would iterate character by
+        # character, searching for asset types "b", "u", "c"... Fail loudly.
+        raise UnknownResourceTypeError(
+            f"resource_types must be a sequence of types, not the string {resource_types!r}. "
+            f"Pass [{resource_types!r}]."
+        )
+    if not resource_types:
+        raise UnknownResourceTypeError(
+            "At least one resource type is required. "
+            f"Choose from: {', '.join(sorted(ASSET_TYPES))}."
+        )
+    resolved = [resolve_asset_type(t) for t in resource_types]
+    return list(dict.fromkeys(resolved))
 
 
 def validate_scope(scope: str) -> str:
@@ -114,24 +180,44 @@ def _to_resource(result: asset_v1.ResourceSearchResult) -> Resource:
 
 def search_resources(
     scope: str,
-    resource_type: str,
-    query: str = "",
+    resource_types: Sequence[str],
+    free_text: str = "",
+    labels: Sequence[str] = (),
+    locations: Sequence[str] = (),
+    projects: Sequence[str] = (),
+    raw_query: str = "",
     limit: int | None = DEFAULT_LIMIT,
     page_size: int = DEFAULT_PAGE_SIZE,
     client: asset_v1.AssetServiceClient | None = None,
-) -> tuple[list[Resource], bool]:
-    """Search a scope for resources of one type.
+) -> SearchResult:
+    """Search a scope for resources of one or more types.
 
-    Returns the resources found and whether `limit` truncated the result set.
+    Filters are compiled into a CAI query and evaluated upstream. Returns the
+    resources found, whether `limit` truncated them, and the query that was
+    actually sent -- the last so both surfaces can show it, since a filter that
+    silently compiles to the wrong thing is otherwise invisible.
+
     Relies on locally authenticated ADC (`gcloud auth application-default login`).
     """
     validate_scope(scope)
-    asset_type = resolve_asset_type(resource_type)
+    asset_types = resolve_asset_types(resource_types)
+
+    try:
+        query = build_query(
+            free_text=free_text,
+            labels=labels,
+            locations=locations,
+            projects=projects,
+            raw=raw_query,
+        )
+    except QueryError as exc:
+        raise InvalidFilterError(str(exc)) from exc
+
     client = client or get_client()
 
     request = asset_v1.SearchAllResourcesRequest(
         scope=scope,
-        asset_types=[asset_type],
+        asset_types=asset_types,
         query=query,
         page_size=page_size,
     )
@@ -150,7 +236,8 @@ def search_resources(
     except gcp_exceptions.NotFound as exc:
         raise ScopeNotFound(f"Scope {scope} was not found.") from exc
     except gcp_exceptions.InvalidArgument as exc:
-        raise InvalidScopeError(
+        # CAI also returns this for an asset-type pattern matching nothing.
+        raise InvalidFilterError(
             f"Cloud Asset Inventory rejected the request: {exc.message}"
         ) from exc
     except gcp_exceptions.GoogleAPICallError as exc:
@@ -159,4 +246,7 @@ def search_resources(
     truncated = limit is not None and len(results) > limit
     if truncated:
         results = results[:limit]
-    return results, truncated
+
+    return SearchResult(
+        resources=results, truncated=truncated, query=query, asset_types=asset_types
+    )

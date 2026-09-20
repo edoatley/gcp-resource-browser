@@ -38,5 +38,17 @@ target-version = "py313"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
+[tool.ruff.lint.flake8-bugbear]
+# Calls in argument defaults are the intended idiom for both frameworks:
+# FastAPI reads them to build the OpenAPI schema, Typer to build the CLI.
+extend-immutable-calls = [
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Body",
+    "fastapi.Depends",
+    "typer.Argument",
+    "typer.Option",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

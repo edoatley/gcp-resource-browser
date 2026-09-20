@@ -83,3 +83,82 @@ def test_passes_the_query_filter_through(use_fake) -> None:
     runner.invoke(cli_module.cli, ["list-resources", "projects/p", "bucket", "-q", "name:backup"])
 
     assert fake.last_request.query == "name:backup"
+
+
+def test_search_compiles_filters_into_the_query(use_fake) -> None:
+    fake = use_fake(FakeAssetClient(results=[]))
+
+    result = runner.invoke(
+        cli_module.cli,
+        [
+            "search",
+            "organizations/123",
+            "backup",
+            "--type",
+            "bucket",
+            "--label",
+            "env=prod",
+            "--location",
+            "europe-west2",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert fake.last_request.query == "backup labels.env:prod location:europe-west2"
+
+
+def test_search_accepts_repeated_types(use_fake) -> None:
+    fake = use_fake(FakeAssetClient(results=[]))
+
+    runner.invoke(
+        cli_module.cli,
+        ["search", "projects/p", "--type", "bucket", "--type", "cloudrun"],
+    )
+
+    assert list(fake.last_request.asset_types) == [
+        "storage.googleapis.com/Bucket",
+        "run.googleapis.com/Service",
+    ]
+
+
+def test_show_query_prints_the_compiled_query(use_fake) -> None:
+    use_fake(FakeAssetClient(results=[make_search_result()]))
+
+    result = runner.invoke(
+        cli_module.cli,
+        ["search", "projects/p", "--type", "bucket", "--label", "env=prod", "--show-query"],
+    )
+
+    assert "labels.env:prod" in result.output
+
+
+def test_empty_result_explains_which_query_ran(use_fake) -> None:
+    """Nothing matched, or the filter compiled wrong? The user must be able to tell."""
+    use_fake(FakeAssetClient(results=[]))
+
+    result = runner.invoke(
+        cli_module.cli,
+        ["search", "projects/p", "--type", "bucket", "--label", "env=prod"],
+    )
+
+    assert "No resources found" in result.output
+    assert "labels.env:prod" in result.output
+
+
+def test_invalid_label_exits_with_usage_code(use_fake) -> None:
+    use_fake(FakeAssetClient())
+
+    result = runner.invoke(
+        cli_module.cli,
+        ["search", "projects/p", "--type", "bucket", "--label", "BadKey=x"],
+    )
+
+    assert result.exit_code == cli_module.EXIT_USAGE
+
+
+def test_types_command_lists_the_mapping() -> None:
+    result = runner.invoke(cli_module.cli, ["types"])
+
+    assert result.exit_code == 0
+    assert "bucket" in result.output
+    assert "storage.googleapis.com/Bucket" in result.output

@@ -21,10 +21,11 @@ from google.api_core import exceptions as gcp_exceptions
 from google.cloud import asset_v1
 from google.rpc.error_details_pb2 import ErrorInfo
 
+from app.aggregate import ATTACHED_IAM_NOTE, attach_iam, fetch_iam_bindings
 from app.config import load_config
 from app.models import Resource
 from app.noise import NoiseFilter
-from app.params import SearchFilters
+from app.params import SORTABLE_FIELDS, SearchFilters
 from app.query import QueryError, build_query
 
 # Friendly names mapped to CAI asset types, loaded from data rather than
@@ -118,6 +119,7 @@ class SearchResult:
     asset_types: list[str]
     suppressed: int = 0
     suppressed_summary: str = ""
+    iam_note: str | None = None
 
 
 @lru_cache(maxsize=1)
@@ -278,6 +280,31 @@ def resolve_project_filter(
     )
 
 
+def build_order_by(sort: Sequence[str]) -> str:
+    """Compile sort terms into CAI's `order_by`, rejecting unknown fields.
+
+    Sorting is done by CAI, not locally: a locally sorted page is only the
+    first page in arbitrary order, then sorted -- which looks right and is
+    wrong. Unknown fields are rejected rather than dropped, since a silently
+    ignored sort produces plausible output in the wrong order.
+    """
+    terms = []
+    for term in sort:
+        field_name, _, direction = term.strip().partition(" ")
+        if field_name not in SORTABLE_FIELDS:
+            raise InvalidFilterError(
+                f"Cannot sort by {field_name!r}. Cloud Asset Inventory sorts on: "
+                f"{', '.join(SORTABLE_FIELDS)}."
+            )
+        direction = direction.strip().upper()
+        if direction not in ("", "ASC", "DESC"):
+            raise InvalidFilterError(
+                f"Invalid sort direction {direction!r} in {term!r}. Use ASC or DESC."
+            )
+        terms.append(f"{field_name} {direction}".strip())
+    return ", ".join(terms)
+
+
 def _translate(exc: gcp_exceptions.GoogleAPICallError, scope: str) -> ResourceExplorerError:
     """Map a Google exception onto a domain error.
 
@@ -346,6 +373,7 @@ def search_resources(
         asset_types=asset_types,
         query=query,
         page_size=filters.page_size,
+        order_by=build_order_by(filters.sort),
     )
 
     limit = filters.limit
@@ -369,6 +397,17 @@ def search_resources(
     except gcp_exceptions.GoogleAPICallError as exc:
         raise _translate(exc, filters.scope) from exc
 
+    iam_note = None
+    if filters.include_iam:
+        # Enrichment, not discovery: one extra call for the scope, joined onto
+        # a set the search already narrowed.
+        try:
+            bindings = fetch_iam_bindings(filters.scope, asset_types, client)
+        except gcp_exceptions.GoogleAPICallError as exc:
+            raise _translate(exc, filters.scope) from exc
+        results = attach_iam(results, bindings)
+        iam_note = ATTACHED_IAM_NOTE
+
     return SearchResult(
         resources=results,
         truncated=truncated,
@@ -376,4 +415,5 @@ def search_resources(
         asset_types=asset_types,
         suppressed=noise.suppressed,
         suppressed_summary=noise.summary(),
+        iam_note=iam_note,
     )

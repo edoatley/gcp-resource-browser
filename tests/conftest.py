@@ -69,13 +69,22 @@ class FakeAssetClient:
         results: list[asset_v1.ResourceSearchResult] | None = None,
         raises: Exception | None = None,
         projects: list[asset_v1.ResourceSearchResult] | None = None,
+        iam_policies: list[asset_v1.IamPolicySearchResult] | None = None,
     ) -> None:
         self.results = results or []
         self.raises = raises
         # Answers the project ID -> number lookup, which is a separate CAI call.
         self.projects = projects or []
+        self.iam_policies = iam_policies or []
         self.last_request: asset_v1.SearchAllResourcesRequest | None = None
         self.requests: list[asset_v1.SearchAllResourcesRequest] = []
+        self.iam_request: asset_v1.SearchAllIamPoliciesRequest | None = None
+
+    def search_all_iam_policies(self, request: asset_v1.SearchAllIamPoliciesRequest):
+        self.iam_request = request
+        if self.raises is not None:
+            raise self.raises
+        return iter(self.iam_policies)
 
     def search_all_resources(self, request: asset_v1.SearchAllResourcesRequest):
         self.requests.append(request)
@@ -91,6 +100,19 @@ class FakeAssetClient:
             return iter(self.projects)
         self.last_request = request
         return iter(self.results)
+
+
+def make_iam_result(
+    resource: str = "//storage.googleapis.com/buckets/example",
+    role: str = "roles/storage.admin",
+    members: tuple[str, ...] = ("user:someone@example.com",),
+) -> asset_v1.IamPolicySearchResult:
+    """A CAI IAM policy result; `resource` is the join key."""
+    result = asset_v1.IamPolicySearchResult(resource=resource)
+    binding = result.policy.bindings.add()
+    binding.role = role
+    binding.members.extend(members)
+    return result
 
 
 @pytest.fixture

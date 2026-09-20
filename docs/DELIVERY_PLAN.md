@@ -316,80 +316,66 @@ showing where the remaining time actually goes.
 
 ---
 
-## Phase 5 — API maturity ☐
+## Phase 5 — API maturity ☑
 
 **Goal:** the PRD's OpenAPI and aggregated-response objectives — the point at which the API is
 fit for other teams to consume.
 
-- ☐ `gcp-explorer openapi --out openapi.yml` to export the spec to a file. FastAPI serves the
-  schema and Swagger UI already; the PRD asks specifically for a committed `openapi.yml`
-  artifact, which is what downstream codegen consumes.
-- ☐ Machine-readable CLI output (`--output json|csv|table`) so the CLI is scriptable, not just
-  human-readable.
-- ☐ Sorting and stable ordering of results.
+- ☑ `gcp-explorer openapi --out openapi.yml` exports the spec; `openapi.yml` is committed.
+- ☑ `GET /v1/summary` and `gcp-explorer summary` — counts by type, project and location in one
+  payload.
+- ☑ `?include=iam` / `--include-iam` — resources joined to their attached IAM bindings.
+- ☑ `--output json|csv|table` on the CLI.
+- ☑ Sorting via `--sort` / `?sort=`.
 - ☑ API versioning prefix (`/v1/...`) — pulled forward and delivered in Phase 1.
-- ☐ Aggregation, as scoped in the section below.
 
-### Resolving "aggregate data from multiple GCP sources"
+### Sorting is server-side, like every other filter
 
-The PRD asks for this (Objectives §2) while also selecting CAI as *the* data engine and
-rejecting standard GCP APIs. The tension is only apparent: **"multiple sources" means multiple
-CAI surfaces, not multiple data engines.** The rejected pattern is iterating per-project service
-APIs *to discover what exists*. Reading several CAI methods and joining them is not that.
+CAI's `order_by` accepts a fixed field list (`name`, `assetType`, `project`, `displayName`,
+`location`, `createTime`, …), verified from the request contract. Sorting locally would order
+*one page of an arbitrary selection* — output that looks right and is wrong. An unknown field
+is rejected rather than dropped, for the same reason: a silently ignored sort produces
+plausible output in the wrong order.
 
-CAI exposes far more than the one method currently used:
+Note the asymmetry: `assetType` is **sortable** but not **queryable**, which is why Phase 3's
+noise reduction still cannot be pushed upstream.
 
-| Surface | Answers |
-|:---|:---|
-| `search_all_resources` | What exists *(in use today)* |
-| `search_all_iam_policies` | Who is granted access, by policies attached at or below a scope |
-| `batch_get_effective_iam_policies` | Who *effectively* has access to specific resources, inheritance included |
-| `analyze_org_policy_governed_assets` | Which org-policy constraints govern an asset |
-| `batch_get_assets_history` | How an asset changed over a time window |
-| `list_assets` / `export_assets` | Full metadata snapshot, incl. bulk export to GCS/BigQuery |
+### The IAM join, and the caveat that ships with it
 
-**The design: a two-stage model.**
+`search_all_iam_policies` is the second CAI surface. Its `resource` field is the same full
+resource name a resource search reports as `name`, confirmed against live data, so that is the
+join key — and the reason Phase 1's "capture `full_name`" was a prerequisite.
 
-1. **Discovery is always CAI search, one call, scope-wide.** Unchanged, and the rule stands.
-2. **Enrichment is opt-in and operates only on an already-narrowed result set.** The user has
-   filtered to N resources; enrichment attaches extra facets to those N.
+It is **one extra call for the whole scope**, not one per resource. That is what makes it an
+aggregation rather than the per-project fan-out the PRD rejects.
 
-This makes the architectural rule precise, and worth restating in exactly this form:
+Two honesty guards, both tested:
 
-> Never iterate APIs to **find** resources. You may call additional APIs to **enrich** a bounded
-> set the user has already narrowed to.
+- **The response always states its semantics.** `iam_note` says the bindings are
+  *attached only*, and that inherited grants from a parent project, folder or organization are
+  not included. Confirmed against live data: a project-level policy comes back as its own row
+  and does not attach to the bucket beneath it. Presenting attached-only bindings as "who can
+  access this" would be wrong in the unsafe direction.
+- **`None` and `[]` mean different things.** `None` is "IAM was not requested"; `[]` is "it was,
+  and nothing is attached". Conflating them would let a reader mistake *not asked* for
+  *nothing granted*.
 
-**Concrete first deliverable — `?include=iam`.** "Show me every public bucket in the
-organisation and who can reach it" is the motivating query. It needs resources joined to IAM,
-which no single CAI method returns, so it is a genuine aggregation and a genuinely optimised
-payload.
+### Machine-readable output keeps stdout clean
 
-- ☐ Resource ↔ IAM join, keyed on the CAI **full resource name** (note: the code currently
-  keeps only `display_name`, so Phase 1's "capture more of the CAI payload" is a hard
-  prerequisite).
-- ☐ Use `search_all_iam_policies` for the broad, cheap pass. Be explicit in the response about
-  what it does *not* cover: it returns policies **attached** to resources, so a binding
-  inherited from a parent folder or project will not appear against the child. Presenting that
-  as "who can access this bucket" would be quietly wrong, and wrong in the unsafe direction.
-- ☐ For accuracy, offer `batch_get_effective_iam_policies`, which resolves inheritance.
-  Constraint verified against the installed library: **a maximum of 20 resource names per
-  call**, so this needs chunked, concurrency-bounded batching — which is exactly why it belongs
-  after Phase 4's bounded fan-out rather than before it.
-- ☐ Make the accuracy/cost trade-off explicit in the API surface (e.g.
-  `iam_mode=attached|effective`) rather than picking one silently.
-- ☐ Summary aggregation that needs no second surface at all: counts grouped by project, asset
-  type, and location in a single payload — cheap, and probably the most-used endpoint.
+`-o json|csv` writes the payload to stdout and every warning — truncation, suppression, the IAM
+caveat — to stderr, so a pipeline reading stdout gets valid JSON or CSV and nothing else. CSV
+renders nested labels as compact JSON in the cell rather than dropping them, since silently
+omitting data would misrepresent the resource.
 
-**Deferred, and gated:** enriching from a genuine non-CAI service API (live config or state
-that CAI does not index — say a bucket's current public-access-prevention setting). This is
-*permitted* by the rule above since it enriches rather than discovers, but it re-introduces
-per-resource API calls and quota exposure. It should not be built until something concrete
-needs a field CAI lacks, and when it is, it must be opt-in, hard-capped on result count, and
-documented as the slow path. Flagging it here so that the day someone wants it, the constraint
-is already written down.
+`summary` takes no `limit`: a summary of a truncated result set would be a lie.
 
-**Recommended split:** the summary aggregation and `?include=iam` with `attached` mode are
-Phase 5. Effective-IAM mode and anything non-CAI can wait for demand.
+### Deferred, deliberately
+
+- **Effective IAM** (`batch_get_effective_iam_policies`, max 20 names per call) resolves
+  inheritance properly but needs chunked, concurrency-bounded batching — which belongs after
+  Phase 4's bounded fan-out, not before it. The attached/effective distinction is already
+  surfaced in `iam_note`, so adding the mode later is additive rather than a correction.
+- **Non-CAI enrichment** stays gated, per the rule below.
 
 ---
 

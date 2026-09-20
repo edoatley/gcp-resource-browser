@@ -10,6 +10,13 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
+class IamBinding(BaseModel):
+    """One role granted to a set of members on a resource."""
+
+    role: str = Field(description="IAM role, e.g. roles/storage.admin")
+    members: list[str] = Field(description="Principals granted the role")
+
+
 class Resource(BaseModel):
     """A single resource returned by Cloud Asset Inventory."""
 
@@ -40,6 +47,15 @@ class Resource(BaseModel):
     parent_full_resource_name: str | None = Field(
         default=None, description="Full resource name of the parent, where CAI reports one"
     )
+    iam_bindings: list[IamBinding] | None = Field(
+        default=None,
+        description=(
+            "IAM bindings ATTACHED to this resource, when include=iam was requested. "
+            "None means IAM was not requested; an empty list means it was, and none are "
+            "attached. Inherited bindings are NOT included -- see `iam_note` on the "
+            "response envelope."
+        ),
+    )
 
 
 class ResourceList(BaseModel):
@@ -67,7 +83,25 @@ class ResourceList(BaseModel):
     suppressed_summary: str = Field(
         default="", description="Human-readable explanation of what was hidden, and why"
     )
+    iam_note: str | None = Field(
+        default=None,
+        description=(
+            "Present when IAM was requested. States the semantics of what was returned, "
+            "since attached-only bindings are easy to mistake for effective access."
+        ),
+    )
     data: list[Resource]
+
+
+class Summary(BaseModel):
+    """Aggregated counts for a scope, in one round trip."""
+
+    scope: str = Field(description="Scope summarised")
+    total: int = Field(description="Resources counted, after noise reduction")
+    suppressed: int = Field(description="Resources hidden as low-signal")
+    by_asset_type: dict[str, int] = Field(description="Counts per CAI asset type, descending")
+    by_project: dict[str, int] = Field(description="Counts per project, descending")
+    by_location: dict[str, int] = Field(description="Counts per location, descending")
 
 
 class ErrorResponse(BaseModel):

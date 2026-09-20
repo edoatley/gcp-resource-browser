@@ -16,7 +16,8 @@ from fastapi.requests import Request
 from fastapi.responses import JSONResponse
 
 from app import core
-from app.models import ErrorResponse, ResourceList
+from app.aggregate import summarise
+from app.models import ErrorResponse, ResourceList, Summary
 from app.params import DEFAULT_LIMIT, Help, SearchFilters
 
 # Precomputed for the OpenAPI descriptions below, which are evaluated at import.
@@ -83,6 +84,8 @@ def search_resources(
     raw_query: str = Query(default="", description=Help.RAW_QUERY),
     limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=10_000, description=Help.LIMIT),
     show_all: bool = Query(default=False, description=Help.SHOW_ALL),
+    sort: list[str] = Query(default_factory=list, description=Help.SORT, examples=[["name"]]),
+    include_iam: bool = Query(default=False, description=Help.INCLUDE_IAM),
 ) -> ResourceList:
     result = core.search_resources(
         SearchFilters(
@@ -95,6 +98,8 @@ def search_resources(
             raw_query=raw_query,
             limit=limit,
             show_all=show_all,
+            sort=sort,
+            include_iam=include_iam,
         )
     )
     return ResourceList(
@@ -105,8 +110,49 @@ def search_resources(
         truncated=result.truncated,
         suppressed=result.suppressed,
         suppressed_summary=result.suppressed_summary,
+        iam_note=result.iam_note,
         data=result.resources,
     )
+
+
+@app.get(
+    "/v1/summary",
+    response_model=Summary,
+    responses={
+        400: {"model": ErrorResponse, "description": "Unknown type, malformed scope or filter"},
+        403: {"model": ErrorResponse, "description": "Caller lacks Cloud Asset Viewer"},
+        404: {"model": ErrorResponse, "description": "Scope not found"},
+        503: {"model": ErrorResponse, "description": "Cloud Asset API not enabled"},
+    },
+    summary="Counts by type, project and location for a scope",
+)
+def summary(
+    scope: str = Query(description=Help.SCOPE, examples=["organizations/123"]),
+    type: list[str] = Query(default_factory=list, description=Help.TYPE),
+    q: str = Query(default="", description=Help.TERM),
+    label: list[str] = Query(default_factory=list, description=Help.LABEL),
+    location: list[str] = Query(default_factory=list, description=Help.LOCATION),
+    project: list[str] = Query(default_factory=list, description=Help.PROJECT),
+    show_all: bool = Query(default=False, description=Help.SHOW_ALL),
+) -> Summary:
+    """Aggregate a whole scope into one payload.
+
+    No `limit`: a summary of a truncated result set would be a lie, so this
+    always counts everything matching.
+    """
+    result = core.search_resources(
+        SearchFilters(
+            scope=scope,
+            resource_types=type,
+            free_text=q,
+            labels=label,
+            locations=location,
+            projects=project,
+            show_all=show_all,
+            limit=None,
+        )
+    )
+    return summarise(scope, result.resources, result.suppressed)
 
 
 @app.get("/v1/types", summary="List supported resource-type names")

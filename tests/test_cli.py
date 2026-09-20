@@ -293,3 +293,97 @@ def test_fully_suppressed_result_explains_itself(use_fake) -> None:
 
     assert "after hiding 1" in result.output
     assert "--show-all" in result.output
+
+
+def test_json_output_is_clean_on_stdout(use_fake) -> None:
+    """A pipeline reading stdout must get valid JSON and nothing else."""
+    import json
+
+    use_fake(
+        FakeAssetClient(results=[make_search_result(name=f"//x/{i}") for i in range(25)])
+    )
+
+    result = runner.invoke(
+        cli_module.cli, ["search", "projects/p", "--type", "bucket", "-o", "json", "-n", "5"]
+    )
+
+    parsed = json.loads(result.stdout)
+    assert len(parsed) == 5
+
+
+def test_warnings_go_to_stderr_not_into_the_payload(use_fake) -> None:
+    import json
+
+    use_fake(
+        FakeAssetClient(
+            results=[
+                make_search_result(
+                    name="//x/a", asset_type="serviceusage.googleapis.com/Service"
+                ),
+                make_search_result(name="//x/b"),
+            ]
+        )
+    )
+
+    result = runner.invoke(cli_module.cli, ["search", "projects/p", "-o", "json"])
+
+    json.loads(result.stdout)  # must not raise
+    assert "hidden" not in result.stdout
+
+
+def test_csv_output_parses(use_fake) -> None:
+    import csv
+    import io
+
+    use_fake(FakeAssetClient(results=[make_search_result(display_name="b1")]))
+
+    result = runner.invoke(
+        cli_module.cli, ["search", "projects/p", "--type", "bucket", "-o", "csv"]
+    )
+
+    rows = list(csv.DictReader(io.StringIO(result.stdout)))
+    assert rows[0]["display_name"] == "b1"
+
+
+def test_summary_command_reports_totals(use_fake) -> None:
+    use_fake(
+        FakeAssetClient(results=[make_search_result(name=f"//x/{i}") for i in range(4)])
+    )
+
+    result = runner.invoke(cli_module.cli, ["summary", "projects/p"])
+
+    assert result.exit_code == 0
+    assert "4 resources" in result.output
+
+
+def test_summary_json_output(use_fake) -> None:
+    import json
+
+    use_fake(FakeAssetClient(results=[make_search_result()]))
+
+    result = runner.invoke(cli_module.cli, ["summary", "projects/p", "-o", "json"])
+
+    assert json.loads(result.stdout)["total"] == 1
+
+
+def test_openapi_export_writes_a_spec(tmp_path) -> None:
+    import yaml
+
+    out = tmp_path / "openapi.yml"
+    result = runner.invoke(cli_module.cli, ["openapi", "--out", str(out)])
+
+    assert result.exit_code == 0
+    spec = yaml.safe_load(out.read_text())
+    assert spec["openapi"].startswith("3.")
+    assert "/v1/resources" in spec["paths"]
+    assert "/v1/summary" in spec["paths"]
+
+
+def test_bad_sort_exits_with_usage_code(use_fake) -> None:
+    use_fake(FakeAssetClient())
+
+    result = runner.invoke(
+        cli_module.cli, ["search", "projects/p", "--type", "bucket", "--sort", "bogus"]
+    )
+
+    assert result.exit_code == cli_module.EXIT_USAGE

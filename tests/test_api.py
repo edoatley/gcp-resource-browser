@@ -8,7 +8,12 @@ from google.api_core import exceptions as gcp_exceptions
 
 from app import core
 from app.api import app
-from tests.conftest import FakeAssetClient, make_search_result, service_disabled_error
+from tests.conftest import (
+    FakeAssetClient,
+    make_iam_result,
+    make_search_result,
+    service_disabled_error,
+)
 
 
 @pytest.fixture
@@ -218,3 +223,76 @@ def test_show_all_includes_suppressed_resources(client: TestClient, use_fake) ->
 
     assert body["count"] == 2
     assert body["suppressed"] == 0
+
+
+def test_summary_counts_a_scope(client: TestClient, use_fake) -> None:
+    use_fake(
+        FakeAssetClient(
+            results=[
+                make_search_result(name="//x/1", location="europe-west2"),
+                make_search_result(name="//x/2", location="europe-west2"),
+                make_search_result(
+                    name="//x/3", asset_type="compute.googleapis.com/Instance",
+                    location="us-central1",
+                ),
+            ]
+        )
+    )
+
+    body = client.get("/v1/summary", params={"scope": "projects/p"}).json()
+
+    assert body["total"] == 3
+    assert body["by_asset_type"]["storage.googleapis.com/Bucket"] == 2
+    assert body["by_location"] == {"europe-west2": 2, "us-central1": 1}
+
+
+def test_summary_counts_everything_not_a_page(client: TestClient, use_fake) -> None:
+    """A summary of a truncated result set would be a lie, so there is no limit."""
+    fake = use_fake(
+        FakeAssetClient(results=[make_search_result(name=f"//x/{i}") for i in range(2500)])
+    )
+
+    body = client.get("/v1/summary", params={"scope": "projects/p"}).json()
+
+    assert body["total"] == 2500
+    assert fake.last_request is not None
+
+
+def test_include_iam_attaches_bindings_and_the_caveat(client: TestClient, use_fake) -> None:
+    use_fake(
+        FakeAssetClient(
+            results=[make_search_result(name="//x/1")],
+            iam_policies=[make_iam_result(resource="//x/1")],
+        )
+    )
+
+    body = client.get(
+        "/v1/resources", params={"scope": "projects/p", "include_iam": "true"}
+    ).json()
+
+    assert body["data"][0]["iam_bindings"][0]["role"] == "roles/storage.admin"
+    assert "Inherited" in body["iam_note"]
+
+
+def test_iam_note_is_absent_when_iam_was_not_requested(client: TestClient, use_fake) -> None:
+    use_fake(FakeAssetClient(results=[make_search_result()]))
+
+    assert client.get("/v1/resources", params={"scope": "projects/p"}).json()["iam_note"] is None
+
+
+def test_bad_sort_field_is_400(client: TestClient, use_fake) -> None:
+    use_fake(FakeAssetClient())
+
+    response = client.get("/v1/resources", params={"scope": "projects/p", "sort": "bogus"})
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_filter"
+
+
+def test_openapi_documents_every_endpoint(client: TestClient) -> None:
+    """The exported openapi.yml is only useful if the schema is complete."""
+    schema = client.get("/openapi.json").json()
+
+    assert set(schema["paths"]) >= {"/v1/resources", "/v1/summary", "/v1/types"}
+    assert "Summary" in schema["components"]["schemas"]
+    assert "IamBinding" in schema["components"]["schemas"]

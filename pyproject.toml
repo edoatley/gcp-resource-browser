@@ -8,6 +8,7 @@ dependencies = [
     "fastapi",
     "google-cloud-asset",
     "pydantic",
+    "pyyaml>=6.0.3",
     "rich",
     "typer",
     "uvicorn",

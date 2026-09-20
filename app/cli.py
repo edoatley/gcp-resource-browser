@@ -7,12 +7,16 @@ and CI.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import typer
 import uvicorn
 from rich.console import Console
 from rich.table import Table
 
 from app import core
+from app.aggregate import summarise
+from app.output import OutputFormat, to_csv, to_json
 from app.params import DEFAULT_LIMIT, Help, SearchFilters
 
 cli = typer.Typer(help="GCP Resource Explorer CLI", no_args_is_help=True)
@@ -40,6 +44,24 @@ _EXIT_BY_ERROR: dict[type[core.ResourceExplorerError], int] = {
 def _fail(exc: core.ResourceExplorerError) -> typer.Exit:
     err_console.print(f"[red]Error:[/red] {exc}")
     return typer.Exit(code=_EXIT_BY_ERROR.get(type(exc), 1))
+
+
+def _emit(resources: list, output: OutputFormat) -> None:
+    """Write machine-readable output to stdout, unstyled and unwrapped."""
+    text = to_json(resources) if output is OutputFormat.JSON else to_csv(resources)
+    # print(), not console.print(): rich would wrap and colourise, corrupting
+    # the payload for anything downstream.
+    print(text, end="" if output is OutputFormat.CSV else "\n")
+
+
+def _notes_to_stderr(result: core.SearchResult, limit: int) -> None:
+    """Warnings that must not pollute a machine-readable stdout."""
+    if result.truncated:
+        err_console.print(f"Showing the first {limit} results; more exist.")
+    if result.suppressed_summary:
+        err_console.print(result.suppressed_summary)
+    if result.iam_note:
+        err_console.print(result.iam_note)
 
 
 def _report_suppressed(result: core.SearchResult) -> None:
@@ -119,6 +141,11 @@ def search(
         False, "--show-query", help="Print the CAI query the filters compiled to"
     ),
     show_all: bool = typer.Option(False, "--show-all", help=Help.SHOW_ALL),
+    sort: list[str] = typer.Option([], "--sort", help=Help.SORT),
+    include_iam: bool = typer.Option(False, "--include-iam", help=Help.INCLUDE_IAM),
+    output: OutputFormat = typer.Option(
+        OutputFormat.TABLE, "--output", "-o", help=Help.OUTPUT
+    ),
 ) -> None:
     """Search resources across a scope, with filters applied server-side.
 
@@ -137,14 +164,25 @@ def search(
                     raw_query=raw_query,
                     limit=limit,
                     show_all=show_all,
+                    sort=sort,
+                    include_iam=include_iam,
                 )
             )
     except core.ResourceExplorerError as exc:
         raise _fail(exc) from exc
 
+    if output is not OutputFormat.TABLE:
+        # Machine-readable output goes to stdout alone; notes go to stderr so a
+        # pipeline reading stdout gets valid JSON or CSV and nothing else.
+        _emit(result.resources, output)
+        _notes_to_stderr(result, limit)
+        return
+
     _render(result, scope, title=f"GCP resources in {scope}", show_query=show_query)
     _warn_if_truncated(result, limit)
     _report_suppressed(result)
+    if result.iam_note:
+        console.print(f"[dim]{result.iam_note}[/dim]")
 
 
 @cli.command("list-resources")
@@ -175,6 +213,79 @@ def list_resources(
         show_query=False,
     )
     _warn_if_truncated(result, limit)
+
+
+@cli.command("summary")
+def summary_command(
+    scope: str = typer.Argument(..., help=Help.SCOPE),
+    resource_type: list[str] = typer.Option([], "--type", "-t", help=Help.TYPE),
+    label: list[str] = typer.Option([], "--label", "-l", help=Help.LABEL),
+    location: list[str] = typer.Option([], "--location", help=Help.LOCATION),
+    show_all: bool = typer.Option(False, "--show-all", help=Help.SHOW_ALL),
+    output: OutputFormat = typer.Option(
+        OutputFormat.TABLE, "--output", "-o", help=Help.OUTPUT
+    ),
+) -> None:
+    """Count resources in a scope by type, project and location."""
+    try:
+        with console.status(f"Summarising {scope}..."):
+            result = core.search_resources(
+                SearchFilters(
+                    scope=scope,
+                    resource_types=resource_type,
+                    labels=label,
+                    locations=location,
+                    show_all=show_all,
+                    # No limit: a summary of a truncated set would be a lie.
+                    limit=None,
+                )
+            )
+    except core.ResourceExplorerError as exc:
+        raise _fail(exc) from exc
+
+    totals = summarise(scope, result.resources, result.suppressed)
+
+    if output is OutputFormat.JSON:
+        print(totals.model_dump_json(indent=2))
+        return
+
+    console.print(
+        f"[bold]{totals.total}[/bold] resources in {scope}"
+        + (f" ([dim]{totals.suppressed} hidden[/dim])" if totals.suppressed else "")
+    )
+    for title, counts in (
+        ("By type", totals.by_asset_type),
+        ("By project", totals.by_project),
+        ("By location", totals.by_location),
+    ):
+        if not counts:
+            continue
+        table = Table(title=title, show_header=False, box=None, padding=(0, 2))
+        table.add_column(style="cyan")
+        table.add_column(style="magenta", justify="right")
+        for key, count in counts.items():
+            table.add_row(key.split("/")[-1] if title == "By type" else key, str(count))
+        console.print(table)
+
+
+@cli.command("openapi")
+def openapi_command(
+    out: Path = typer.Option(
+        Path("openapi.yml"), "--out", help="Where to write the specification"
+    ),
+) -> None:
+    """Export the API's OpenAPI specification.
+
+    FastAPI serves the schema live at /openapi.json; the PRD asks for a
+    committed openapi.yml, which is what downstream codegen consumes.
+    """
+    import yaml
+
+    from app.api import app as fastapi_app
+
+    spec = fastapi_app.openapi()
+    out.write_text(yaml.safe_dump(spec, sort_keys=False, default_flow_style=False))
+    console.print(f"Wrote {out} ({len(spec.get('paths', {}))} paths)")
 
 
 @cli.command("types")

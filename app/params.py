@@ -31,6 +31,24 @@ DEFAULT_PAGE_SIZE = 500
 DEFAULT_LIMIT = 1000
 
 
+# Fields CAI can sort on, from SearchAllResourcesRequest.order_by. Sorting is
+# server-side, so this list is the API's, not ours -- anything else is rejected
+# rather than silently ignored.
+SORTABLE_FIELDS = (
+    "name",
+    "assetType",
+    "project",
+    "displayName",
+    "description",
+    "location",
+    "createTime",
+    "updateTime",
+    "state",
+    "parentFullResourceName",
+    "parentAssetType",
+)
+
+
 class Help:
     """Descriptions shared by both surfaces."""
 
@@ -45,6 +63,15 @@ class Help:
     )
     RAW_QUERY = "Raw CAI query syntax, ANDed with the other filters"
     LIMIT = "Maximum resources to return"
+    SORT = (
+        "Sort field, with optional ` DESC`. Repeatable for tie-breaks. "
+        f"One of: {', '.join(SORTABLE_FIELDS)}."
+    )
+    OUTPUT = "Output format"
+    INCLUDE_IAM = (
+        "Attach each resource's directly-attached IAM bindings. One extra call for the "
+        "whole scope. Inherited bindings are not included."
+    )
     SHOW_ALL = (
         "Include resources hidden by default (enabled API services, image layers, "
         "auto-created default routes and subnets, and similar)"
@@ -69,3 +96,5 @@ class SearchFilters:
     limit: int | None = DEFAULT_LIMIT
     page_size: int = DEFAULT_PAGE_SIZE
     show_all: bool = False
+    sort: Sequence[str] = field(default_factory=tuple)
+    include_iam: bool = False

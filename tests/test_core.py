@@ -10,6 +10,7 @@ from app.params import SearchFilters
 from tests.conftest import (
     FakeAssetClient,
     filters,
+    make_iam_result,
     make_project_result,
     make_search_result,
     service_disabled_error,
@@ -331,3 +332,86 @@ def test_project_lookup_ignores_a_near_miss() -> None:
 
     with pytest.raises(core.InvalidFilterError):
         core.search_resources(filters(projects=["edo-thing"]), client=client)
+
+
+# --- sorting ----------------------------------------------------------------
+# CAI sorts server-side via order_by. Sorting locally would order one page of
+# an arbitrary selection, which looks right and is wrong.
+
+
+def test_sort_is_passed_to_cai(fake_client: FakeAssetClient) -> None:
+    core.search_resources(filters(sort=["location", "name DESC"]), client=fake_client)
+
+    assert fake_client.last_request.order_by == "location, name DESC"
+
+
+def test_unsorted_search_sends_no_order_by(fake_client: FakeAssetClient) -> None:
+    core.search_resources(filters(), client=fake_client)
+
+    assert fake_client.last_request.order_by == ""
+
+
+def test_unknown_sort_field_is_rejected_not_ignored() -> None:
+    """A silently dropped sort produces plausible output in the wrong order."""
+    client = FakeAssetClient()
+
+    with pytest.raises(core.InvalidFilterError, match="Cannot sort by"):
+        core.search_resources(filters(sort=["bogus"]), client=client)
+    assert client.last_request is None
+
+
+def test_invalid_sort_direction_is_rejected() -> None:
+    with pytest.raises(core.InvalidFilterError, match="sort direction"):
+        core.search_resources(filters(sort=["name SIDEWAYS"]), client=FakeAssetClient())
+
+
+def test_sort_direction_is_normalised() -> None:
+    client = FakeAssetClient(results=[])
+
+    core.search_resources(filters(sort=["name desc"]), client=client)
+
+    assert client.last_request.order_by == "name DESC"
+
+
+# --- IAM enrichment ---------------------------------------------------------
+
+
+def test_iam_is_not_fetched_unless_asked(fake_client: FakeAssetClient) -> None:
+    result = core.search_resources(filters(), client=fake_client)
+
+    assert fake_client.iam_request is None
+    assert result.resources[0].iam_bindings is None
+    assert result.iam_note is None
+
+
+def test_iam_is_one_extra_call_for_the_whole_scope() -> None:
+    """Enrichment, not fan-out: a call per resource would be the rejected pattern."""
+    client = FakeAssetClient(
+        results=[make_search_result(name=f"//x/{i}") for i in range(10)],
+        iam_policies=[make_iam_result(resource="//x/3")],
+    )
+
+    result = core.search_resources(filters(include_iam=True), client=client)
+
+    assert client.iam_request is not None
+    assert client.iam_request.scope == "projects/p"
+    assert len(result.resources) == 10
+    joined = {r.full_name: r.iam_bindings for r in result.resources}
+    assert joined["//x/3"][0].role == "roles/storage.admin"
+    assert joined["//x/4"] == [], "no policy attached, but IAM was requested"
+
+
+def test_iam_request_is_scoped_to_the_same_asset_types() -> None:
+    client = FakeAssetClient(results=[], iam_policies=[])
+
+    core.search_resources(filters(types=("bucket",), include_iam=True), client=client)
+
+    assert list(client.iam_request.asset_types) == ["storage.googleapis.com/Bucket"]
+
+
+def test_iam_response_carries_the_attached_only_caveat() -> None:
+    client = FakeAssetClient(results=[make_search_result()], iam_policies=[])
+
+    result = core.search_resources(filters(include_iam=True), client=client)
+
+    assert result.iam_note and "Inherited" in result.iam_note

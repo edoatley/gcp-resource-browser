@@ -63,6 +63,8 @@ the user runs `gcloud auth application-default login` first. This is a deliberat
 - `app/query.py` — compiles filters into CAI query syntax. See the warning below.
 - `app/noise.py` + `app/noise_rules.json` — default-suppressed low-signal resources.
 - `app/config.py` — site overrides for the asset-type mapping and noise rules.
+- `app/aggregate.py` — IAM join and the summary rollup.
+- `app/output.py` — JSON/CSV emitters for the CLI.
 - `app/params.py` — `SearchFilters` (what a search takes) and `Help` (how each filter is
   described). Both surfaces read from here.
 - `app/asset_types.json` — the friendly-name mapping, loaded by `core.py` and read with `jq`
@@ -120,6 +122,20 @@ client-side to results as they stream back — forced, not chosen: `assetType` i
 CAI field and `asset_types` is an include list with no exclusion. A user filter narrows what is
 *fetched*; a noise rule hides low-value rows from a result asked for broadly. Because of this,
 `limit` caps *visible* results, and the pager is consumed lazily.
+
+**Sorting is server-side** (`order_by`), on CAI's fixed field list in `params.SORTABLE_FIELDS`.
+Unknown fields are rejected, never dropped — a silently ignored sort gives plausible output in
+the wrong order. Note `assetType` is sortable but not queryable, which is why noise reduction
+still cannot move upstream.
+
+**IAM is attached-only, and must keep saying so.** `iam_note` on every IAM-bearing response
+states that inherited grants are excluded; presenting attached bindings as effective access is
+wrong in the unsafe direction. `iam_bindings is None` means not requested, `[]` means requested
+and none attached — do not collapse them. Effective IAM (`batch_get_effective_iam_policies`,
+20 names per call) is deferred until after bounded fan-out exists.
+
+**`-o json|csv` writes the payload to stdout and every warning to stderr.** Keep it that way,
+or piped output stops being parseable.
 
 **Never weaken the two noise invariants:** `--show-all` / `?show_all=true` disables every rule,
 and what was suppressed is always reported with reasons. An audit tool that silently drops rows

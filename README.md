@@ -8,9 +8,10 @@ too quota-hungry to be viable.
 - **[Delivery plan](docs/DELIVERY_PLAN.md)** — phased breakdown of what ships when.
 - **[Walkthrough](docs/WALKTHROUGH.md)** — manual verification against real GCP.
 
-> **Status: usable.** Phases 0–3 are complete: search every resource type by default with
-> noise reduction, free-text search, and label/location/project filtering compiled server-side.
-> See the delivery plan for what is coming.
+> **Status: usable.** Phases 0–3 and 5 are complete: search every resource type by default with
+> noise reduction, server-side filtering and sorting, IAM enrichment, aggregated summaries, and
+> JSON/CSV output. Phase 4 (performance at 2000-project scale) is deferred — it cannot be
+> measured without an estate that size. See the delivery plan.
 
 ## Requirements
 
@@ -96,9 +97,22 @@ uv run gcp-explorer list-resources projects/my-project bucket
 # Nothing hidden
 uv run gcp-explorer search projects/my-project --show-all
 
+# Sort server-side, and emit machine-readable output
+uv run gcp-explorer search projects/my-project --sort 'createTime DESC' -o json | jq '.[0]'
+uv run gcp-explorer search projects/my-project --type bucket -o csv > buckets.csv
+
+# Attach each resource's IAM bindings — one extra call for the whole scope
+uv run gcp-explorer search projects/my-project --type bucket --include-iam -o json
+
+# Count a scope by type, project and location
+uv run gcp-explorer summary organizations/123456789
+
 uv run gcp-explorer types      # list supported type names
 uv run gcp-explorer --help
 ```
+
+With `-o json` or `-o csv` the payload goes to stdout and every warning to stderr, so a
+pipeline reading stdout gets valid data and nothing else.
 
 ### Noise reduction
 
@@ -116,6 +130,29 @@ suppressed says so explicitly rather than claiming nothing was found.
 Suppression is applied to results rather than compiled into the query, because CAI has no way
 to exclude an asset type — `assetType` is not a queryable field, and `asset_types` is an
 include list. `--limit` still counts *visible* results.
+
+### IAM enrichment
+
+`--include-iam` / `?include_iam=true` attaches each resource's IAM bindings, joined on the CAI
+full resource name. It costs **one extra call for the whole scope**, not one per resource.
+
+The response always states what it means: bindings are those **attached directly** to each
+resource. A grant inherited from a parent project, folder or organization confers real access
+and is *not* included, so this is not a complete answer to "who can reach this bucket".
+Resolving inheritance needs `batch_get_effective_iam_policies`, which is deferred.
+
+In JSON output, `iam_bindings` absent means IAM was not requested; `[]` means it was, and
+nothing is attached.
+
+### OpenAPI
+
+`openapi.yml` is committed and regenerated with:
+
+```bash
+uv run gcp-explorer openapi --out openapi.yml
+```
+
+The live schema is also served at `/openapi.json`, with Swagger UI at `/docs`.
 
 ### Site configuration
 
@@ -168,6 +205,7 @@ uv run gcp-explorer serve      # http://127.0.0.1:8000
 | Endpoint | Description |
 |:---|:---|
 | `GET /v1/resources?scope=&type=&q=&label=&location=&project=&limit=` | Search a scope; `type`, `label`, `location` and `project` are repeatable |
+| `GET /v1/summary?scope=` | Counts by type, project and location, in one payload |
 | `GET /v1/types` | Friendly type names mapped to CAI asset types |
 | `GET /healthz` | Liveness probe |
 | `GET /docs` | Swagger UI (auto-generated) |

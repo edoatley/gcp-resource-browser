@@ -1,0 +1,586 @@
+openapi: 3.1.0
+info:
+  title: GCP Resource Explorer API
+  description: Search Google Cloud resources across a project, folder, or organization
+    via Cloud Asset Inventory.
+  version: 0.1.0
+paths:
+  /v1/resources:
+    get:
+      summary: Search resources in a scope
+      operationId: search_resources_v1_resources_get
+      parameters:
+      - name: scope
+        in: query
+        required: true
+        schema:
+          type: string
+          description: 'CAI scope: organizations/<id>, folders/<id>, or projects/<id>'
+          examples:
+          - projects/my-project
+          title: Scope
+        description: 'CAI scope: organizations/<id>, folders/<id>, or projects/<id>'
+      - name: type
+        in: query
+        required: false
+        schema:
+          type: array
+          items:
+            type: string
+          description: 'Resource type, repeatable. A friendly name, a raw CAI asset
+            type, or an RE2 pattern. Friendly names: address, bucket, cloudrun, dataset,
+            disk, firewall, forwardingrule, function, gke, network, project, secret,
+            serviceaccount, spanner, sql, subnet, subscription, table, topic, vm.'
+          examples:
+          - - bucket
+          title: Type
+        description: 'Resource type, repeatable. A friendly name, a raw CAI asset
+          type, or an RE2 pattern. Friendly names: address, bucket, cloudrun, dataset,
+          disk, firewall, forwardingrule, function, gke, network, project, secret,
+          serviceaccount, spanner, sql, subnet, subscription, table, topic, vm.'
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+          description: Free-text term, matched across all searchable fields
+          default: ''
+          title: Q
+        description: Free-text term, matched across all searchable fields
+      - name: label
+        in: query
+        required: false
+        schema:
+          type: array
+          items:
+            type: string
+          description: 'Label filter, repeatable: `key=value`, or `key` to match any
+            value'
+          examples:
+          - - env=prod
+          title: Label
+        description: 'Label filter, repeatable: `key=value`, or `key` to match any
+          value'
+      - name: location
+        in: query
+        required: false
+        schema:
+          type: array
+          items:
+            type: string
+          description: Location filter, repeatable; several are ORed. Supports `*`
+            wildcards.
+          examples:
+          - - europe-west2
+          title: Location
+        description: Location filter, repeatable; several are ORed. Supports `*` wildcards.
+      - name: project
+        in: query
+        required: false
+        schema:
+          type: array
+          items:
+            type: string
+          description: Project filter, repeatable; several are ORed. Accepts a project
+            ID or number (IDs are resolved to numbers, which is what CAI matches on).
+          title: Project
+        description: Project filter, repeatable; several are ORed. Accepts a project
+          ID or number (IDs are resolved to numbers, which is what CAI matches on).
+      - name: raw_query
+        in: query
+        required: false
+        schema:
+          type: string
+          description: Raw CAI query syntax, ANDed with the other filters
+          default: ''
+          title: Raw Query
+        description: Raw CAI query syntax, ANDed with the other filters
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 10000
+          minimum: 1
+          description: Maximum resources to return
+          default: 1000
+          title: Limit
+        description: Maximum resources to return
+      - name: show_all
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Include resources hidden by default (enabled API services,
+            image layers, auto-created default routes and subnets, and similar)
+          default: false
+          title: Show All
+        description: Include resources hidden by default (enabled API services, image
+          layers, auto-created default routes and subnets, and similar)
+      - name: sort
+        in: query
+        required: false
+        schema:
+          type: array
+          items:
+            type: string
+          description: 'Sort field, with optional ` DESC`. Repeatable for tie-breaks.
+            One of: name, assetType, project, displayName, description, location,
+            createTime, updateTime, state, parentFullResourceName, parentAssetType.'
+          examples:
+          - - name
+          title: Sort
+        description: 'Sort field, with optional ` DESC`. Repeatable for tie-breaks.
+          One of: name, assetType, project, displayName, description, location, createTime,
+          updateTime, state, parentFullResourceName, parentAssetType.'
+      - name: include_iam
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Attach each resource's directly-attached IAM bindings. One
+            extra call for the whole scope. Inherited bindings are not included.
+          default: false
+          title: Include Iam
+        description: Attach each resource's directly-attached IAM bindings. One extra
+          call for the whole scope. Inherited bindings are not included.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResourceList'
+        '400':
+          description: Unknown type, malformed scope or filter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Caller lacks Cloud Asset Viewer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Scope not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Cloud Asset Inventory call failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Cloud Asset API not enabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/summary:
+    get:
+      summary: Counts by type, project and location for a scope
+      description: 'Aggregate a whole scope into one payload.
+
+
+        No `limit`: a summary of a truncated result set would be a lie, so this
+
+        always counts everything matching.'
+      operationId: summary_v1_summary_get
+      parameters:
+      - name: scope
+        in: query
+        required: true
+        schema:
+          type: string
+          description: 'CAI scope: organizations/<id>, folders/<id>, or projects/<id>'
+          examples:
+          - organizations/123
+          title: Scope
+        description: 'CAI scope: organizations/<id>, folders/<id>, or projects/<id>'
+      - name: type
+        in: query
+        required: false
+        schema:
+          type: array
+          items:
+            type: string
+          description: Resource type, repeatable. A friendly name, a raw CAI asset
+            type, or an RE2 pattern.
+          title: Type
+        description: Resource type, repeatable. A friendly name, a raw CAI asset type,
+          or an RE2 pattern.
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+          description: Free-text term, matched across all searchable fields
+          default: ''
+          title: Q
+        description: Free-text term, matched across all searchable fields
+      - name: label
+        in: query
+        required: false
+        schema:
+          type: array
+          items:
+            type: string
+          description: 'Label filter, repeatable: `key=value`, or `key` to match any
+            value'
+          title: Label
+        description: 'Label filter, repeatable: `key=value`, or `key` to match any
+          value'
+      - name: location
+        in: query
+        required: false
+        schema:
+          type: array
+          items:
+            type: string
+          description: Location filter, repeatable; several are ORed. Supports `*`
+            wildcards.
+          title: Location
+        description: Location filter, repeatable; several are ORed. Supports `*` wildcards.
+      - name: project
+        in: query
+        required: false
+        schema:
+          type: array
+          items:
+            type: string
+          description: Project filter, repeatable; several are ORed. Accepts a project
+            ID or number (IDs are resolved to numbers, which is what CAI matches on).
+          title: Project
+        description: Project filter, repeatable; several are ORed. Accepts a project
+          ID or number (IDs are resolved to numbers, which is what CAI matches on).
+      - name: show_all
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Include resources hidden by default (enabled API services,
+            image layers, auto-created default routes and subnets, and similar)
+          default: false
+          title: Show All
+        description: Include resources hidden by default (enabled API services, image
+          layers, auto-created default routes and subnets, and similar)
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Summary'
+        '400':
+          description: Unknown type, malformed scope or filter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Caller lacks Cloud Asset Viewer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Scope not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Cloud Asset API not enabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/types:
+    get:
+      summary: List supported resource-type names
+      description: 'Friendly names mapped to CAI asset types.
+
+
+        Raw CAI asset types are accepted anywhere a friendly name is, so this is a
+
+        convenience listing rather than the set of what can be searched.'
+      operationId: list_types_v1_types_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  type: string
+                type: object
+                title: Response List Types V1 Types Get
+components:
+  schemas:
+    ErrorResponse:
+      properties:
+        error:
+          type: string
+          title: Error
+          description: Machine-readable error code
+        detail:
+          type: string
+          title: Detail
+          description: Human-readable explanation
+      type: object
+      required:
+      - error
+      - detail
+      title: ErrorResponse
+      description: Body returned with any non-2xx status.
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    IamBinding:
+      properties:
+        role:
+          type: string
+          title: Role
+          description: IAM role, e.g. roles/storage.admin
+        members:
+          items:
+            type: string
+          type: array
+          title: Members
+          description: Principals granted the role
+      type: object
+      required:
+      - role
+      - members
+      title: IamBinding
+      description: One role granted to a set of members on a resource.
+    Resource:
+      properties:
+        full_name:
+          type: string
+          title: Full Name
+          description: CAI full resource name, e.g. //storage.googleapis.com/buckets/my-bucket.
+            This is the join key against IAM policy search.
+        asset_type:
+          type: string
+          title: Asset Type
+          description: CAI asset type, e.g. storage.googleapis.com/Bucket
+        display_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Display Name
+          description: Short name of the resource
+        project:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Project
+          description: Project NUMBER owning the resource, as CAI reports it
+        project_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Project Id
+          description: Human-readable project ID, derived from the parent resource
+            path where CAI exposes it. None for resources whose parent is not a project.
+        location:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Location
+          description: Region, zone, or multi-region
+        state:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: State
+          description: Resource state, where the type reports one
+        labels:
+          additionalProperties:
+            type: string
+          type: object
+          title: Labels
+          description: User-applied labels
+        create_time:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Create Time
+          description: Resource creation time
+        parent_full_resource_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Parent Full Resource Name
+          description: Full resource name of the parent, where CAI reports one
+        iam_bindings:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/IamBinding'
+            type: array
+          - type: 'null'
+          title: Iam Bindings
+          description: IAM bindings ATTACHED to this resource, when include=iam was
+            requested. None means IAM was not requested; an empty list means it was,
+            and none are attached. Inherited bindings are NOT included -- see `iam_note`
+            on the response envelope.
+      type: object
+      required:
+      - full_name
+      - asset_type
+      title: Resource
+      description: A single resource returned by Cloud Asset Inventory.
+    ResourceList:
+      properties:
+        scope:
+          type: string
+          title: Scope
+          description: Scope searched, e.g. projects/my-project
+        asset_types:
+          items:
+            type: string
+          type: array
+          title: Asset Types
+          description: CAI asset types that were searched
+        query:
+          type: string
+          title: Query
+          description: The Cloud Asset Inventory query the filters compiled to. Echoed
+            back so a filter that compiles to something unintended is visible rather
+            than silent.
+        count:
+          type: integer
+          title: Count
+          description: Number of resources in `data`
+        truncated:
+          type: boolean
+          title: Truncated
+          description: True when `limit` cut the result set short and more resources
+            exist
+        suppressed:
+          type: integer
+          title: Suppressed
+          description: Resources hidden as low-signal. Always reported, never silently
+            dropped; pass show_all=true to include them.
+          default: 0
+        suppressed_summary:
+          type: string
+          title: Suppressed Summary
+          description: Human-readable explanation of what was hidden, and why
+          default: ''
+        iam_note:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Iam Note
+          description: Present when IAM was requested. States the semantics of what
+            was returned, since attached-only bindings are easy to mistake for effective
+            access.
+        data:
+          items:
+            $ref: '#/components/schemas/Resource'
+          type: array
+          title: Data
+      type: object
+      required:
+      - scope
+      - asset_types
+      - query
+      - count
+      - truncated
+      - data
+      title: ResourceList
+      description: Envelope returned by a resource search.
+    Summary:
+      properties:
+        scope:
+          type: string
+          title: Scope
+          description: Scope summarised
+        total:
+          type: integer
+          title: Total
+          description: Resources counted, after noise reduction
+        suppressed:
+          type: integer
+          title: Suppressed
+          description: Resources hidden as low-signal
+        by_asset_type:
+          additionalProperties:
+            type: integer
+          type: object
+          title: By Asset Type
+          description: Counts per CAI asset type, descending
+        by_project:
+          additionalProperties:
+            type: integer
+          type: object
+          title: By Project
+          description: Counts per project, descending
+        by_location:
+          additionalProperties:
+            type: integer
+          type: object
+          title: By Location
+          description: Counts per location, descending
+      type: object
+      required:
+      - scope
+      - total
+      - suppressed
+      - by_asset_type
+      - by_project
+      - by_location
+      title: Summary
+      description: Aggregated counts for a scope, in one round trip.
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError

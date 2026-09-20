@@ -38,6 +38,7 @@ _STATUS_BY_ERROR: dict[type[core.ResourceExplorerError], int] = {
     core.InvalidFilterError: 400,
     core.ScopeAccessDenied: 403,
     core.ScopeNotFound: 404,
+    core.ApiNotEnabledError: 503,
     core.UpstreamError: 502,
 }
 
@@ -60,6 +61,7 @@ def handle_explorer_error(request: Request, exc: core.ResourceExplorerError) -> 
         403: {"model": ErrorResponse, "description": "Caller lacks Cloud Asset Viewer"},
         404: {"model": ErrorResponse, "description": "Scope not found"},
         502: {"model": ErrorResponse, "description": "Cloud Asset Inventory call failed"},
+        503: {"model": ErrorResponse, "description": "Cloud Asset API not enabled"},
     },
     summary="Search resources in a scope",
 )

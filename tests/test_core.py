@@ -7,7 +7,12 @@ from google.api_core import exceptions as gcp_exceptions
 
 from app import core
 from app.params import SearchFilters
-from tests.conftest import FakeAssetClient, filters, make_search_result
+from tests.conftest import (
+    FakeAssetClient,
+    filters,
+    make_search_result,
+    service_disabled_error,
+)
 
 
 def test_maps_cai_fields_onto_the_model(fake_client: FakeAssetClient) -> None:
@@ -184,3 +189,36 @@ def test_empty_type_list_is_rejected() -> None:
     with pytest.raises(core.UnknownResourceTypeError):
         core.search_resources(filters(types=()), client=client)
     assert client.last_request is None
+
+
+def test_disabled_api_is_not_reported_as_a_permission_problem() -> None:
+    """Google returns 403 for both; the remedies are completely different.
+
+    Reported by a user whose search failed against projects/idp-prototype-edo
+    while the actual problem was an unenabled API on their quota project. The
+    old message named the wrong cause, the wrong project and the wrong fix.
+    """
+    client = FakeAssetClient(raises=service_disabled_error(quota_project="billing-project"))
+
+    with pytest.raises(core.ApiNotEnabledError) as caught:
+        core.search_resources(filters(scope="projects/searched-project"), client=client)
+
+    message = str(caught.value)
+    assert "billing-project" in message
+    assert "gcloud services enable cloudasset.googleapis.com" in message
+    # It must not blame the scope being searched, which is a different project.
+    assert "searched-project" not in message
+    assert "roles/cloudasset.viewer" not in message
+
+
+def test_genuine_permission_denial_still_reports_the_scope() -> None:
+    client = FakeAssetClient(raises=gcp_exceptions.PermissionDenied("caller lacks permission"))
+
+    with pytest.raises(core.ScopeAccessDenied) as caught:
+        core.search_resources(filters(scope="projects/locked-down"), client=client)
+
+    message = str(caught.value)
+    assert "projects/locked-down" in message
+    assert "roles/cloudasset.viewer" in message
+    # The upstream detail is preserved rather than replaced by our guess.
+    assert "caller lacks permission" in message

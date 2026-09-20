@@ -35,6 +35,17 @@ wheel-build step.
 
 ## Authentication
 
+Two distinct prerequisites, and conflating them wastes time: the caller needs
+`roles/cloudasset.viewer` **on the scope searched**, and the Cloud Asset API must be enabled on
+the **ADC quota project** the call bills to. Those are frequently different projects. Google
+returns 403 for both, so `core._service_disabled_error` inspects the structured `ErrorInfo` for
+`reason == "SERVICE_DISABLED"` and raises `ApiNotEnabledError` naming the billing project.
+Keep that distinction: the first version of this message blamed the searched project for a
+disabled API elsewhere and sent a real user to fix the wrong thing.
+
+Generally: when translating a Google exception, include `exc.message` rather than replacing it
+with an assumption about the cause.
+
 All GCP access goes through Application Default Credentials. The tool does no auth of its own —
 the user runs `gcloud auth application-default login` first. This is a deliberate decision
 (see PRD "Resolved Decisions") so the same code works unchanged under a service account.

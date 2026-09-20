@@ -20,6 +20,7 @@ from pathlib import Path
 
 from google.api_core import exceptions as gcp_exceptions
 from google.cloud import asset_v1
+from google.rpc.error_details_pb2 import ErrorInfo
 
 from app.models import Resource
 from app.params import SearchFilters
@@ -70,6 +71,18 @@ class ScopeAccessDenied(ResourceExplorerError):
     code = "permission_denied"
 
 
+class ApiNotEnabledError(ResourceExplorerError):
+    """The Cloud Asset API is disabled on the project the request bills to.
+
+    Google returns HTTP 403 for this as well as for genuine permission
+    failures, and the two have completely different remedies -- and often
+    concern different projects. Conflating them sends people to fix the wrong
+    thing, so it gets its own class.
+    """
+
+    code = "api_not_enabled"
+
+
 class ScopeNotFound(ResourceExplorerError):
     code = "scope_not_found"
 
@@ -97,6 +110,34 @@ def get_client() -> asset_v1.AssetServiceClient:
     because FastAPI runs the synchronous endpoints in a threadpool.
     """
     return asset_v1.AssetServiceClient()
+
+
+def _error_info(exc: gcp_exceptions.GoogleAPICallError) -> ErrorInfo | None:
+    """Pull Google's machine-readable ErrorInfo out of an exception, if present."""
+    for detail in getattr(exc, "details", None) or []:
+        if isinstance(detail, ErrorInfo):
+            return detail
+    return None
+
+
+def _service_disabled_error(exc: gcp_exceptions.PermissionDenied) -> ApiNotEnabledError | None:
+    """Recognise "API not enabled" hiding inside a 403."""
+    info = _error_info(exc)
+    if info is None or info.reason != "SERVICE_DISABLED":
+        return None
+
+    metadata = dict(info.metadata)
+    service = metadata.get("service", "cloudasset.googleapis.com")
+    # The consumer is the project the call bills to -- the ADC quota project,
+    # which is frequently NOT the project being searched. Naming the wrong one
+    # is the whole reason this case is separated out.
+    consumer = metadata.get("containerInfo") or metadata.get("consumer", "your quota project")
+    return ApiNotEnabledError(
+        f"{service} is not enabled on {consumer}, the project this request bills to "
+        f"(which may differ from the scope being searched). Enable it with:\n"
+        f"    gcloud services enable {service} --project={consumer}\n"
+        "Then wait a minute for it to propagate."
+    )
 
 
 def resolve_asset_type(resource_type: str) -> str:
@@ -203,9 +244,15 @@ def search_resources(
         window = itertools.islice(pager, limit + 1) if limit is not None else pager
         results = [_to_resource(item) for item in window]
     except gcp_exceptions.PermissionDenied as exc:
+        # Google returns 403 both for a disabled API and for a genuine IAM
+        # failure. Check the structured reason before assuming which.
+        disabled = _service_disabled_error(exc)
+        if disabled is not None:
+            raise disabled from exc
         raise ScopeAccessDenied(
             f"Permission denied on {filters.scope}. The cloudasset.assets.searchAllResources "
-            "permission (roles/cloudasset.viewer) is required on that scope."
+            "permission (roles/cloudasset.viewer) is required on that scope. "
+            f"Upstream said: {exc.message}"
         ) from exc
     except gcp_exceptions.NotFound as exc:
         raise ScopeNotFound(f"Scope {filters.scope} was not found.") from exc

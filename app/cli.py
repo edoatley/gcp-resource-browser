@@ -24,6 +24,7 @@ EXIT_USAGE = 2
 EXIT_PERMISSION = 3
 EXIT_NOT_FOUND = 4
 EXIT_UPSTREAM = 5
+EXIT_NOT_CONFIGURED = 6
 
 _EXIT_BY_ERROR: dict[type[core.ResourceExplorerError], int] = {
     core.UnknownResourceTypeError: EXIT_USAGE,
@@ -32,6 +33,7 @@ _EXIT_BY_ERROR: dict[type[core.ResourceExplorerError], int] = {
     core.ScopeAccessDenied: EXIT_PERMISSION,
     core.ScopeNotFound: EXIT_NOT_FOUND,
     core.UpstreamError: EXIT_UPSTREAM,
+    core.ApiNotEnabledError: EXIT_NOT_CONFIGURED,
 }
 
 

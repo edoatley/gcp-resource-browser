@@ -17,8 +17,17 @@ too quota-hungry to be viable.
 - [`uv`](https://docs.astral.sh/uv/)
 - `gcloud` CLI, authenticated for Application Default Credentials
 - The `cloudasset.assets.searchAllResources` permission on the scope you query
-  (`roles/cloudasset.viewer`), and the Cloud Asset API enabled on the project your credentials
-  bill to
+  (`roles/cloudasset.viewer`)
+- The Cloud Asset API enabled on the project your credentials **bill to**, which is often not
+  the project you are searching:
+
+  ```bash
+  # the billing project is your ADC quota project
+  gcloud services enable cloudasset.googleapis.com --project=<your-quota-project>
+  ```
+
+  Google returns HTTP 403 for a disabled API as well as for a genuine permission failure, so
+  the tool distinguishes them and names the right project in each case.
 
 ## Setup
 
@@ -73,7 +82,8 @@ Results are capped at 1000 by default so an org-wide search cannot run away; whe
 bites, the CLI says so rather than silently returning a short list. Raise it with `--limit`.
 
 **Exit codes:** `0` success · `2` bad usage (unknown type, malformed scope or filter) · `3`
-permission denied · `4` scope not found · `5` upstream CAI failure.
+permission denied · `4` scope not found · `5` upstream CAI failure · `6` Cloud Asset API not
+enabled on the billing project.
 
 ### HTTP API
 
@@ -122,7 +132,7 @@ curl 'http://127.0.0.1:8000/v1/resources?scope=organizations/123\
 
 `scope` takes any CAI scope, matching the CLI. Errors return a typed body with a real status
 code — `400` unknown type or malformed scope, `403` permission denied, `404` scope not found,
-`502` upstream failure:
+`502` upstream failure, `503` Cloud Asset API not enabled:
 
 ```json
 { "error": "unknown_resource_type", "detail": "Unsupported resource type 'vm'. Choose from: bucket, cloudrun" }

@@ -8,7 +8,7 @@ from typer.testing import CliRunner
 
 from app import cli as cli_module
 from app import core
-from tests.conftest import FakeAssetClient, make_search_result
+from tests.conftest import FakeAssetClient, make_search_result, service_disabled_error
 
 runner = CliRunner()
 
@@ -162,3 +162,13 @@ def test_types_command_lists_the_mapping() -> None:
     assert result.exit_code == 0
     assert "bucket" in result.output
     assert "storage.googleapis.com/Bucket" in result.output
+
+
+def test_disabled_api_exits_with_its_own_code(use_fake) -> None:
+    """Distinct from EXIT_UPSTREAM: the remedy is to enable an API, not retry."""
+    use_fake(FakeAssetClient(raises=service_disabled_error(quota_project="billing-project")))
+
+    result = runner.invoke(cli_module.cli, ["list-resources", "projects/p", "bucket"])
+
+    assert result.exit_code == cli_module.EXIT_NOT_CONFIGURED
+    assert "gcloud services enable" in result.output

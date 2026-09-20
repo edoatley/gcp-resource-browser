@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 from google.api_core import exceptions as gcp_exceptions
 from google.cloud import asset_v1
+from google.rpc.error_details_pb2 import ErrorInfo
 
 from app.params import SearchFilters
 
@@ -68,3 +69,29 @@ def fake_client() -> FakeAssetClient:
 @pytest.fixture
 def permission_denied() -> gcp_exceptions.PermissionDenied:
     return gcp_exceptions.PermissionDenied("caller lacks permission")
+
+
+def service_disabled_error(
+    service: str = "cloudasset.googleapis.com",
+    quota_project: str = "my-quota-project",
+) -> gcp_exceptions.PermissionDenied:
+    """A 403 that is really "API not enabled".
+
+    Mirrors the structure Google actually returns, captured from a live call:
+    a PermissionDenied carrying an ErrorInfo with reason SERVICE_DISABLED, whose
+    metadata names the *billing* project rather than the scope searched.
+    """
+    info = ErrorInfo(
+        reason="SERVICE_DISABLED",
+        domain="googleapis.com",
+        metadata={
+            "service": service,
+            "containerInfo": quota_project,
+            "consumer": f"projects/{quota_project}",
+            "serviceTitle": "Cloud Asset API",
+        },
+    )
+    return gcp_exceptions.PermissionDenied(
+        f"{service} has not been used in project {quota_project} before or it is disabled.",
+        details=[info],
+    )

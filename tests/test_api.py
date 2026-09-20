@@ -8,7 +8,7 @@ from google.api_core import exceptions as gcp_exceptions
 
 from app import core
 from app.api import app
-from tests.conftest import FakeAssetClient, make_search_result
+from tests.conftest import FakeAssetClient, make_search_result, service_disabled_error
 
 
 @pytest.fixture
@@ -164,3 +164,13 @@ def test_types_endpoint_lists_the_mapping(client: TestClient) -> None:
     body = client.get("/v1/types").json()
     assert body["bucket"] == "storage.googleapis.com/Bucket"
     assert body["vm"] == "compute.googleapis.com/Instance"
+
+
+def test_disabled_api_is_503_not_403(client: TestClient, use_fake) -> None:
+    """403 would tell a caller to fix their IAM; the deployment is misconfigured."""
+    use_fake(FakeAssetClient(raises=service_disabled_error(quota_project="billing-project")))
+
+    response = client.get("/v1/resources", params={"scope": "projects/p", "type": "bucket"})
+
+    assert response.status_code == 503
+    assert response.json()["error"] == "api_not_enabled"

@@ -272,9 +272,33 @@ Do the cheap wins first and measure before reaching for anything structural:
 - ☑ **Create the CAI client once and reuse it.** Delivered early in Phase 1 (`core.get_client`,
   `lru_cache`), since the restructure made it natural and the tests needed client injection
   anyway. Was the largest avoidable latency cost.
-- ☐ **Establish a latency baseline against a real large scope and record it**, so "acceptable
-  latency thresholds" becomes a number rather than an adjective. Do this *before* the remaining
-  items, so their value is measured rather than assumed.
+- ◐ **Establish a latency baseline.** First measurements taken against the dev estate
+  (515 resources, 7 projects), recorded below. Incomplete: see the scale caveat.
+
+  | Search | Latency | Result |
+  |:---|---:|:---|
+  | All types, cold (client constructed) | 1816 ms | 33 shown, 90 hidden |
+  | All types, warm | 675 ms | 33 shown, 90 hidden |
+  | All types, 130-resource project | 580 ms | 11 shown, 119 hidden |
+  | Single type | 273 ms | 2 shown |
+  | All types, `--limit 5` | 732 ms | 5 shown, 99 hidden |
+
+  Three things this already settles:
+
+  - **Client construction costs ~1.1 s** (1816 ms cold vs 675 ms warm). The reuse landed early
+    in Phase 1 was worth roughly three round trips, confirming it was the largest avoidable
+    cost.
+  - **A round trip is ~300 ms**, so latency here is dominated by the call, not by our
+    processing. Caching would help repeated identical queries; nothing else on this list would
+    move these numbers.
+  - **`--limit` does not reduce latency at this size** (732 ms vs 675 ms, i.e. noise). The
+    whole estate fits in one 500-row page, so stopping early saves no network. Limit is a
+    memory and readability control here, and only becomes a latency control past one page.
+
+  **Scale caveat — this baseline cannot validate the PRD's target.** 515 resources is roughly
+  one page; the PRD is about 2000+ projects, where pagination, fan-out and quota behaviour
+  dominate and none of them are exercised here. The remaining Phase 4 items should not be
+  judged against these numbers.
 - ☐ Short-TTL response cache. CAI is a near-real-time index, not live data (per the PRD's own
   trade-off table), so caching costs little accuracy and protects against repeated identical
   dashboard polls.

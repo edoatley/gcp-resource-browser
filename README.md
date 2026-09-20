@@ -15,29 +15,53 @@ too quota-hungry to be viable.
 
 - Python 3.13+
 - [`uv`](https://docs.astral.sh/uv/)
-- `gcloud` CLI, authenticated for Application Default Credentials
-- The `cloudasset.assets.searchAllResources` permission on the scope you query
-  (`roles/cloudasset.viewer`)
-- The Cloud Asset API enabled on the project your credentials **bill to**, which is often not
-  the project you are searching:
-
-  ```bash
-  # the billing project is your ADC quota project
-  gcloud services enable cloudasset.googleapis.com --project=<your-quota-project>
-  ```
-
-  Google returns HTTP 403 for a disabled API as well as for a genuine permission failure, so
-  the tool distinguishes them and names the right project in each case.
+- `gcloud` CLI, authenticated
+- `jq`, for the differential scripts
 
 ## Setup
 
 ```bash
 uv sync
-gcloud auth application-default login
 ```
 
-The tool performs no authentication of its own — it reads ADC. The same code therefore runs
-unchanged under a service account in CI or a container.
+### GCP access
+
+The tool performs no authentication of its own — it reads Application Default Credentials, so
+the same code runs unchanged under a service account in CI or a container.
+
+`scripts/setup-gcp.sh` provisions everything needed: a dedicated project to act as the API and
+quota home, a read-only service account, and the IAM grants. It is idempotent — re-run it to
+add a newly created project to the list it grants on.
+
+```bash
+./scripts/setup-gcp.sh
+
+# then, interactively (needs a browser):
+gcloud auth application-default login \
+    --impersonate-service-account=resource-browser@gcp-resource-browser-eo.iam.gserviceaccount.com
+gcloud auth application-default set-quota-project gcp-resource-browser-eo
+```
+
+Impersonation is used in preference to a downloaded JSON key: there is no long-lived
+credential on disk to leak or rotate.
+
+Two prerequisites that are easy to confuse, because Google returns HTTP 403 for both:
+
+| Requirement | Where it applies |
+|:---|:---|
+| Cloud Asset API enabled | The **quota project** the call bills to |
+| `roles/cloudasset.viewer` | Each **scope** you search |
+
+These are usually different projects. The tool tells them apart and names the right one — exit
+code `6` and HTTP `503` mean the API is disabled, not that your IAM is wrong.
+
+**Billing is not required.** The Cloud Asset API enables on an unbilled project and its search
+calls are free, so `setup-gcp.sh` deliberately skips linking a billing account — linking one
+would consume a billing-account project slot for no benefit.
+
+**Without an organisation** there is no `organizations/` scope to search and no single place to
+grant viewer, so each project needs its own grant. The one-call-across-2000-projects behaviour
+needs an org to exercise.
 
 ## Usage
 

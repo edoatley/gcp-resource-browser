@@ -35,6 +35,11 @@ wheel-build step.
 
 ## Authentication
 
+`scripts/setup-gcp.sh` provisions the GCP side (dedicated project `gcp-resource-browser-eo`,
+service account `resource-browser@...`, IAM grants) and is idempotent — re-run it to add a
+project. ADC uses impersonation rather than a downloaded key. Billing is deliberately not
+linked: the Cloud Asset API enables on an unbilled project and its search calls are free.
+
 Two distinct prerequisites, and conflating them wastes time: the caller needs
 `roles/cloudasset.viewer` **on the scope searched**, and the Cloud Asset API must be enabled on
 the **ADC quota project** the call bills to. Those are frequently different projects. Google

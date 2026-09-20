@@ -1,0 +1,23 @@
+# Keep the build context small and, more importantly, keep credentials and
+# local state out of it entirely.
+.venv/
+.git/
+.github/
+.idea/
+.mcp.json
+__pycache__/
+*.py[cod]
+dist/
+build/
+*.egg-info/
+
+# Never let a credential reach the build context, let alone an image layer.
+.env
+*-credentials.json
+application_default_credentials.json
+gcp-explorer.json
+
+tests/
+scripts/
+docs/
+openapi.yml

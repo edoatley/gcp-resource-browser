@@ -296,3 +296,38 @@ def test_openapi_documents_every_endpoint(client: TestClient) -> None:
     assert set(schema["paths"]) >= {"/v1/resources", "/v1/summary", "/v1/types"}
     assert "Summary" in schema["components"]["schemas"]
     assert "IamBinding" in schema["components"]["schemas"]
+
+
+def test_liveness_does_no_io(client: TestClient, monkeypatch) -> None:
+    """A liveness probe that called GCP would turn an upstream blip into an
+    outage, restarting containers whenever Google had a bad minute."""
+
+    def explode():
+        raise AssertionError("healthz must not build a client or call GCP")
+
+    monkeypatch.setattr(core, "get_client", explode)
+
+    assert client.get("/healthz").status_code == 200
+
+
+def test_readiness_reports_ok_when_credentials_resolve(client: TestClient, use_fake) -> None:
+    use_fake(FakeAssetClient())
+
+    response = client.get("/readyz")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ready"
+
+
+def test_readiness_is_503_when_credentials_are_missing(client: TestClient, monkeypatch) -> None:
+    """Not ready is a 503, not a crash: a probe must never raise."""
+
+    def no_credentials():
+        raise RuntimeError("could not determine Application Default Credentials")
+
+    monkeypatch.setattr(core, "get_client", no_credentials)
+
+    response = client.get("/readyz")
+
+    assert response.status_code == 503
+    assert "Application Default Credentials" in response.json()["detail"]

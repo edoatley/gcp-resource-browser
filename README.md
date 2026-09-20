@@ -8,10 +8,10 @@ too quota-hungry to be viable.
 - **[Delivery plan](docs/DELIVERY_PLAN.md)** — phased breakdown of what ships when.
 - **[Walkthrough](docs/WALKTHROUGH.md)** — manual verification against real GCP.
 
-> **Status: usable.** Phases 0–3 and 5 are complete: search every resource type by default with
+> **Status: usable.** Phases 0–3, 5 and 6 are complete: search every resource type by default with
 > noise reduction, server-side filtering and sorting, IAM enrichment, aggregated summaries, and
-> JSON/CSV output. Phase 4 (performance at 2000-project scale) is deferred — it cannot be
-> measured without an estate that size. See the delivery plan.
+> JSON/CSV output, plus a container image and CI. Phase 4 (performance at 2000-project scale)
+> is deferred — it cannot be measured without an estate that size. See the delivery plan.
 
 ## Requirements
 
@@ -319,6 +319,35 @@ ASSET_TYPES = {
 ```
 
 Both the CLI and the API validate against this dict, so one entry lights up both surfaces.
+
+## Running in a container
+
+```bash
+docker build -t gcp-explorer .
+
+# The API, with local ADC mounted read-only
+docker run --rm -p 8000:8000 \
+    -v "$HOME/.config/gcloud/application_default_credentials.json:/adc.json:ro" \
+    -e GOOGLE_APPLICATION_CREDENTIALS=/adc.json \
+    -e GOOGLE_CLOUD_QUOTA_PROJECT=<your-quota-project> \
+    gcp-explorer
+
+# Or the CLI
+docker run --rm \
+    -v "$HOME/.config/gcloud/application_default_credentials.json:/adc.json:ro" \
+    -e GOOGLE_APPLICATION_CREDENTIALS=/adc.json \
+    -e GOOGLE_CLOUD_QUOTA_PROJECT=<your-quota-project> \
+    gcp-explorer list-resources projects/my-project bucket
+```
+
+**No credentials are baked into the image.** On Cloud Run or GKE, ADC comes from the metadata
+server and no mount is needed — attach `roles/cloudasset.viewer` to the runtime service account
+and the tool picks it up unchanged, which is what the ADC decision was for.
+
+| Endpoint | Purpose |
+|:---|:---|
+| `/healthz` | Liveness. Does no I/O, so an upstream blip never restarts the container. |
+| `/readyz` | Readiness. 503 when ADC cannot be resolved; does not call CAI, to avoid burning quota on probes. |
 
 ## Development
 

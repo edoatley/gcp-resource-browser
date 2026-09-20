@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      # No credentials and no network: the CAI client is faked throughout, so
+      # the suite runs anywhere. Anything needing real GCP lives in scripts/
+      # and is run by hand.
+      - name: Test
+        run: uv run pytest -q
+
+      - name: Check the committed OpenAPI spec is current
+        run: |
+          uv run gcp-explorer openapi --out /tmp/openapi.yml
+          diff -u openapi.yml /tmp/openapi.yml \
+            || { echo "::error::openapi.yml is stale. Run: uv run gcp-explorer openapi --out openapi.yml"; exit 1; }
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image
+        run: docker build -t gcp-explorer:ci .
+
+      - name: It starts and reports its version
+        run: docker run --rm gcp-explorer:ci --help
+
+      # The image must never carry a credential. Cheap to check, catastrophic
+      # to get wrong, and easy to introduce by accident via a stray COPY.
+      - name: No credentials baked into the image
+        run: |
+          if docker run --rm --entrypoint sh gcp-explorer:ci -c \
+              'ls /app/*credentials*.json /app/.env 2>/dev/null'; then
+            echo "::error::credential-shaped file found in the image"; exit 1
+          fi
+          echo "clean"

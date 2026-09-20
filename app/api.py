@@ -167,4 +167,28 @@ def list_types() -> dict[str, str]:
 
 @app.get("/healthz", summary="Liveness probe", include_in_schema=False)
 def healthz() -> dict[str, str]:
+    """Is the process up. Deliberately does no I/O.
+
+    A liveness probe that called GCP would restart the container whenever
+    Google had a bad minute, turning an upstream blip into an outage.
+    """
     return {"status": "ok"}
+
+
+@app.get("/readyz", summary="Readiness probe", include_in_schema=False)
+def readyz() -> JSONResponse:
+    """Can this instance serve: are credentials resolvable and the client built.
+
+    Checks that ADC resolves and the CAI client constructs -- the two things
+    that make a deployment useless rather than slow. It does NOT call Cloud
+    Asset Inventory: a probe on every pod every few seconds would burn quota to
+    tell us something a real request reports anyway.
+    """
+    try:
+        core.get_client()
+    except Exception as exc:  # noqa: BLE001 - a probe must never raise
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not ready", "detail": f"{type(exc).__name__}: {exc}"},
+        )
+    return JSONResponse(status_code=200, content={"status": "ready"})

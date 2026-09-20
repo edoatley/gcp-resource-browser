@@ -20,7 +20,13 @@ uv run gcp-explorer list-resources projects/my-project bucket
 uv run gcp-explorer serve                # FastAPI on http://127.0.0.1:8000 (docs at /docs)
 ```
 
-No CI yet — that is Phase 6.
+CI (`.github/workflows/ci.yml`) runs lint, format check, tests, an `openapi.yml` staleness
+check, an image build, and a check that no credential is baked into the image. If you change
+the API surface, regenerate the spec or CI fails:
+`uv run gcp-explorer openapi --out openapi.yml`.
+
+The Dockerfile builds at `/app` rather than `/build` on purpose: a virtualenv's entry points
+carry an absolute shebang, so relocating `.venv` breaks every console script.
 
 `scripts/` holds `gcloud` equivalents of each capability plus `compare-resources.sh`, which
 diffs the two and exits non-zero on disagreement. Unit tests use a fake client, so they cannot
@@ -32,6 +38,10 @@ Packaging note: the code lives in `app/`, which does not match the project name
 `gcp-resource-browser`, so `pyproject.toml` declares
 `[tool.hatch.build.targets.wheel] packages = ["app"]`. Removing that breaks `uv sync` at the
 wheel-build step.
+
+**`/healthz` must never do I/O** — a liveness probe that calls GCP turns an upstream blip into
+a restart loop. `/readyz` may check that credentials resolve, but must not call CAI: a probe
+per pod every few seconds would burn quota to report what a real request already surfaces.
 
 ## Authentication
 

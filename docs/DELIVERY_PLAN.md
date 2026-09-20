@@ -379,50 +379,119 @@ omitting data would misrepresent the resource.
 
 ---
 
-## Phase 6 — Distribution ☐
+## Phase 6 — Distribution ☑
 
 **Goal:** the PRD's stated maturation path from local execution to container distribution.
 
-- ☐ Dockerfile serving the API, with ADC mounted in rather than baked (credentials must never
-  enter the image).
-- ☐ Document service-account usage as the non-interactive alternative to
-  `gcloud auth application-default login` — the auth decision was made precisely so this works
-  without code changes.
-- ☐ CI running lint and tests.
-- ☐ Health/readiness endpoint for container orchestration.
+- ☑ `Dockerfile` serving the API. Multi-stage, non-root (uid 10001), 323 MB.
+- ☑ `.dockerignore` keeping credentials and local state out of the build context entirely.
+- ☑ `/healthz` (liveness) and `/readyz` (readiness), with a `HEALTHCHECK` in the image.
+- ☑ GitHub Actions CI: lint, format check, tests, a staleness check on `openapi.yml`, an image
+  build, and a check that no credential is baked into the image.
+- ☑ Service-account usage documented — the auth decision was made precisely so this needs no
+  code change.
+
+### No credentials in the image, enforced rather than asserted
+
+ADC is supplied at runtime: by the metadata server on Cloud Run or GKE, or by mounting a local
+ADC file read-only. Copying a key into an image puts a long-lived credential into every layer
+and every registry that ever holds it, where deleting the file in a later layer does not remove
+it.
+
+Three overlapping guards, because this is cheap to check and catastrophic to get wrong:
+`.dockerignore` excludes credential-shaped filenames from the build context, the Dockerfile
+carries a comment saying why, and CI fails the build if such a file appears in the image.
+
+### Liveness and readiness are deliberately different
+
+- `/healthz` does **no I/O**. A liveness probe that called GCP would restart containers whenever
+  Google had a bad minute, turning an upstream blip into a self-inflicted outage.
+- `/readyz` checks that ADC resolves and the CAI client constructs — the two failures that make
+  an instance useless rather than merely slow — and returns 503 with the reason otherwise. It
+  does **not** call CAI: a probe on every pod every few seconds would burn quota to report
+  something a real request surfaces anyway.
+
+Verified in the running container: without credentials, `/healthz` stays 200 while `/readyz`
+returns 503 naming `DefaultCredentialsError`. So a misconfigured instance stops taking traffic
+without being restart-looped.
+
+### Verified, not assumed
+
+The image was built and run against real GCP, not just written: `docker run ... list-resources
+projects/idp-prototype-edo bucket` returns the two buckets, and the containerised API answers
+`/v1/resources` with live data.
+
+One trap found by building it: a virtualenv's entry points carry an **absolute** shebang, so
+building in `/build` and copying `.venv` to `/app` leaves every script pointing at a python
+that no longer exists. The builder now works at the final path.
 
 ---
 
 ## Phase 7 (conditional) — Async, only if measurement demands it ☐
 
-**Not scheduled.** This phase exists so the option is documented, not so it gets built. The
-PRD's stated rationale for FastAPI includes non-blocking calls to GCP; Phase 4 already achieves
-non-blocking request handling via the threadpool, so this phase is about the remaining ceiling,
-not about correctness.
+**Status: planned, not scheduled.** Everything below is ready to execute; none of it should be
+executed yet. The PRD's stated rationale for FastAPI includes non-blocking calls to GCP, but
+plain `def` endpoints already run in a threadpool, so the API is non-blocking today. This phase
+addresses a *ceiling*, not a defect.
 
-**Trigger conditions — build this only if one of these is measured, not anticipated:**
+Phase 4 was skipped for the same reason this is unscheduled: the dev estate is 515 resources in
+one CAI page, and neither phase's bottleneck can be reproduced there.
 
-- Sustained concurrent requests exceed the ~40-thread limiter and raising it stops helping
-  (thread memory or context-switching becomes the constraint).
-- Fan-out breadth per request grows large enough that one thread per in-flight CAI call is
-  genuinely wasteful — threads are fine for tens of concurrent calls, less so for thousands.
+### Trigger conditions — measured, never anticipated
 
-**What it would involve, if triggered:**
+Execute only when one of these is observed:
 
-- `AssetServiceAsyncClient` is available in the installed `google-cloud-asset`;
-  `search_all_resources` is a true coroutine returning a `SearchAllResourcesAsyncPager` that
-  supports `__aiter__`, so `for resource in pager:` becomes `async for`.
-- The cost is viral: the core becomes `async def`, and the CLI must wrap every call in
-  `asyncio.run(...)`. Maintaining parallel sync and async cores is the one option to rule out —
-  it breaks the rule that CLI and API share all behaviour.
-- An async gRPC client binds to the running event loop, so it must be built inside the loop
-  (FastAPI `lifespan`) rather than at import.
-- **Transport constraint:** the only async transport shipped is
-  `AssetServiceGrpcAsyncIOTransport` — there is no async REST transport, though a sync
-  `AssetServiceRestTransport` exists. `grpcio` is already in the dependency tree and `grpc.aio`
-  imports cleanly here, but anywhere that permits HTTPS/REST and not gRPC (some corporate
-  egress proxies) this phase is unavailable and the Phase 4 threadpool is the only option.
-  Worth knowing before Phase 6 fixes the deployment target.
+1. **Thread exhaustion.** Sustained concurrent requests saturate anyio's limiter (40 by
+   default) *and* raising it stops helping — thread memory or context-switching becomes the
+   constraint. Measure by raising the limiter first; it is one line, and if that fixes it, this
+   phase is not the answer.
+2. **Wasteful fan-out breadth.** A single request fans out across enough scopes that one thread
+   per in-flight CAI call is genuinely expensive. Threads are fine for tens of concurrent
+   calls; thousands is where `asyncio` wins.
+3. **Streaming pressure.** Long-lived streaming responses over an org-wide result set hold a
+   thread each for their whole lifetime. This is the most likely real trigger, and it arrives
+   with Phase 4's streaming work rather than independently.
+
+None of these can be observed below roughly a few hundred projects.
+
+### Ordered plan, if triggered
+
+1. **Re-measure first.** Record the ceiling as a number, the way Phase 4's baseline is
+   recorded. Without it there is no way to tell afterwards whether this helped.
+2. **Raise the anyio limiter and re-measure.** The cheap fix must be ruled out before the
+   expensive one. If `to_thread` capacity resolves it, stop here.
+3. **Swap the client.** `AssetServiceAsyncClient` exists in the installed
+   `google-cloud-asset`; `search_all_resources` is a true coroutine returning a
+   `SearchAllResourcesAsyncPager` supporting `__aiter__`, so `for item in pager` becomes
+   `async for`.
+4. **Make the core async and bridge the CLI.** `search_resources` becomes `async def`, and each
+   Typer command wraps it in `asyncio.run(...)`. **Do not** maintain parallel sync and async
+   cores — that breaks the rule that the CLI and API share all behaviour, which is the property
+   every phase so far has relied on.
+5. **Move client construction inside the loop.** An async gRPC client binds to the running event
+   loop, so it must be built in a FastAPI `lifespan` handler rather than at import. The
+   `lru_cache` on `get_client` becomes wrong, not merely suboptimal.
+6. **Re-verify the differential checks.** `scripts/` calls the core directly; an async core
+   changes that call site. They caught a stale signature once already.
+
+### Known blockers and costs
+
+- **Transport.** The only async transport shipped is `AssetServiceGrpcAsyncIOTransport` — there
+  is no async REST, though a sync `AssetServiceRestTransport` exists. `grpcio` is already in the
+  dependency tree and `grpc.aio` imports cleanly, but anywhere permitting HTTPS and not gRPC
+  (some corporate egress proxies) this phase is simply unavailable. Confirm the deployment
+  target's egress before starting.
+- **Blast radius.** Async is viral: core, both surfaces, the scripts module, and every test that
+  calls `search_resources`. Roughly 240 tests touch that path today.
+- **The trap it must avoid.** Marking handlers `async def` while still calling the *sync*
+  client would stall the event loop and make throughput worse than today. If this phase is done
+  halfway, it is worse than not done.
+
+### What would make this unnecessary
+
+Phase 4's caching and bounded fan-out address the same pressure more cheaply. If an org-scale
+measurement ever becomes possible, do Phase 4 first and re-measure: it may close the gap
+entirely.
 
 ---
 

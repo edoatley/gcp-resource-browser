@@ -42,6 +42,16 @@ def _fail(exc: core.ResourceExplorerError) -> typer.Exit:
     return typer.Exit(code=_EXIT_BY_ERROR.get(type(exc), 1))
 
 
+def _report_suppressed(result: core.SearchResult) -> None:
+    """Never let hidden rows go unmentioned.
+
+    An audit tool that quietly drops results is worse than one that shows too
+    many, so the count and the reasons are always stated.
+    """
+    if result.suppressed_summary:
+        console.print(f"[dim]{result.suppressed_summary}[/dim]")
+
+
 def _warn_if_truncated(result: core.SearchResult, limit: int) -> None:
     """A cap that silently shortened the list would misreport the estate."""
     if result.truncated:
@@ -57,6 +67,12 @@ def _render(result: core.SearchResult, scope: str, title: str, show_query: bool)
         console.print(f"[dim]CAI query: {result.query}[/dim]")
 
     if not result.resources:
+        if result.suppressed:
+            console.print(
+                f"[yellow]No resources found[/yellow] after hiding {result.suppressed}. "
+                "Everything matched was low-signal; use --show-all to see it."
+            )
+            return
         console.print("[yellow]No resources found.[/yellow]")
         # An empty result with filters applied is ambiguous -- nothing matched,
         # or the filters compiled to something unintended. Show the query so
@@ -91,7 +107,7 @@ def _render(result: core.SearchResult, scope: str, title: str, show_query: bool)
 def search(
     scope: str = typer.Argument(..., help=Help.SCOPE),
     term: str = typer.Argument("", help=Help.TERM),
-    resource_type: list[str] = typer.Option(..., "--type", "-t", help=Help.TYPE),
+    resource_type: list[str] = typer.Option([], "--type", "-t", help=Help.TYPE),
     label: list[str] = typer.Option([], "--label", "-l", help=Help.LABEL),
     location: list[str] = typer.Option([], "--location", help=Help.LOCATION),
     project: list[str] = typer.Option([], "--project", help=Help.PROJECT),
@@ -102,8 +118,12 @@ def search(
     show_query: bool = typer.Option(
         False, "--show-query", help="Print the CAI query the filters compiled to"
     ),
+    show_all: bool = typer.Option(False, "--show-all", help=Help.SHOW_ALL),
 ) -> None:
-    """Search resources across a scope, with filters applied server-side."""
+    """Search resources across a scope, with filters applied server-side.
+
+    With no --type, searches every asset type and hides low-signal resources.
+    """
     try:
         with console.status(f"Searching {scope}..."):
             result = core.search_resources(
@@ -116,6 +136,7 @@ def search(
                     projects=project,
                     raw_query=raw_query,
                     limit=limit,
+                    show_all=show_all,
                 )
             )
     except core.ResourceExplorerError as exc:
@@ -123,6 +144,7 @@ def search(
 
     _render(result, scope, title=f"GCP resources in {scope}", show_query=show_query)
     _warn_if_truncated(result, limit)
+    _report_suppressed(result)
 
 
 @cli.command("list-resources")

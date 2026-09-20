@@ -45,6 +45,10 @@ class Help:
     )
     RAW_QUERY = "Raw CAI query syntax, ANDed with the other filters"
     LIMIT = "Maximum resources to return"
+    SHOW_ALL = (
+        "Include resources hidden by default (enabled API services, image layers, "
+        "auto-created default routes and subnets, and similar)"
+    )
 
 
 @dataclass(frozen=True)
@@ -64,3 +68,4 @@ class SearchFilters:
     raw_query: str = ""
     limit: int | None = DEFAULT_LIMIT
     page_size: int = DEFAULT_PAGE_SIZE
+    show_all: bool = False

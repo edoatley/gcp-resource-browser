@@ -181,27 +181,73 @@ instead.
 
 ---
 
-## Phase 3 — Query-all-by-default with noise reduction ☐
+## Phase 3 — Query-all-by-default with noise reduction ☑
 
 **Goal:** the PRD's resolved decision that the tool queries *all* resource types by default and
 hides low-value noise unless asked.
 
-- ☐ Make `asset_types` optional — omitting it searches everything in scope. Coupled to the
-  noise filter below: without it, an org-wide all-types search is unusable, which is why
-  Phase 2 left `--type` required.
-- ☐ Noise-reduction ruleset (default-suppressed asset types: standard IAM roles, default network
-  routes, system-managed and auto-created resources), defined as data in one place so it is
-  reviewable and testable rather than scattered through call sites.
-- ☐ `--show-all` (CLI) and `?show_all=true` (API) to bypass it, exactly as named in the PRD.
-- ☐ Report what was suppressed (`"142 results, 38 hidden — use --show-all"`) so the filter is
-  never silently misleading.
-- ☐ Allow the ruleset to be overridden from a config file for site-specific noise. Design the
-  override mechanism once and apply it to `app/asset_types.json` too — both need discovery
-  paths, merge-or-replace semantics, and validation. See the Interlude above for why the
-  asset-type mapping was made data without yet being made configurable.
+- ☑ `asset_types` optional — omitting `--type` / `type=` searches every supported type.
+- ☑ Noise ruleset in `app/noise_rules.json`, 15 rules, each carrying the reason it exists.
+- ☑ `--show-all` (CLI) and `?show_all=true` (API), exactly as the PRD names them.
+- ☑ What was suppressed is always reported, with the top reasons named.
+- ☑ Site overrides via `app/config.py` — one mechanism, shared with the asset-type mapping.
 
-**Exit criteria:** a bare `gcp-explorer search organizations/123` returns a readable result set;
-`--show-all` returns the unfiltered set; the difference between them is explained in the output.
+### Suppression is client-side, and that was forced
+
+Verified against the live API: `assetType` is **not** a queryable CAI field
+(`400 Unsupported field: 'assetType'`), and `asset_types` is an include list with no way to
+express exclusion — RE2 has no negative lookahead. So unlike user filters, which are always
+compiled into the query and evaluated upstream, noise rules are applied to results as they
+stream back.
+
+The distinction is worth keeping straight: **a user filter narrows what is fetched; a noise rule
+hides low-value rows from a result the user asked for broadly.** The server-side rule from
+Phase 2 is not weakened by this.
+
+The consequence is that `limit` caps *visible* results. The pager is consumed lazily, skipping
+noise, stopping one past the limit — so a `--limit 5` yields five real resources rather than
+five rows of which four were noise, without draining the pager.
+
+### The ruleset was derived from a census, not from intuition
+
+A survey of the real estate (515 resources, 37 types) drove every rule:
+
+| Asset type | Share | Verdict |
+|:---|---:|:---|
+| `serviceusage.../Service` | 42% | enabled APIs, not resources — suppress |
+| `artifactregistry.../DockerImage` | 10% | image layers; the Repository is the resource |
+| `compute.../Route` | 8% | only `default-route-*` — user routes kept |
+| `compute.../Subnetwork` | 8% | only `default` — custom subnets kept |
+| `run.../Revision` | 5% | per-deploy rows; the Service is the resource |
+
+**Measured effect: 515 resources become 84. 84% suppressed.** Spot-checked rather than trusted:
+`ace-gcp-training` hides 22 enabled APIs and 4 system log sinks/buckets, keeping the Project;
+`gcp-sandbox-2026-18798` hides 43 default routes, 42 auto-created subnets and the default VPC,
+while keeping service accounts, buckets, the Artifact Registry repository and workload identity.
+
+Seven of the fifteen rules are **name-scoped**, which is what makes 84% safe: a default VPC
+subnet is noise, a subnet someone deliberately built is not, and both are
+`compute.googleapis.com/Subnetwork`. Whole-type suppression alone would have hidden real
+infrastructure.
+
+### Two invariants, because hiding data from an audit tool is dangerous
+
+1. `--show-all` disables suppression entirely — no rule is exempt.
+2. The count and reasons are always reported. A fully-suppressed result says
+   `No resources found after hiding 22`, never a bare "No resources found", because the two
+   mean very different things.
+
+### Site configuration
+
+`app/config.py` is the single override mechanism the Phase 1 Interlude deferred. Discovery:
+`$GCP_EXPLORER_CONFIG`, then `./gcp-explorer.json`, then `~/.config/gcp-explorer/config.json`.
+
+It **merges** rather than replaces — a site adds the types and rules it cares about without
+restating the defaults, so an upgrade cannot silently drop newly added ones. `unsuppress` turns
+off a default rule by asset type. Unknown keys are rejected rather than ignored: a typo'd key
+would otherwise leave someone convinced their config had applied. A missing
+`$GCP_EXPLORER_CONFIG` path is an error, since naming a path and having it quietly ignored is
+worse than failing.
 
 ---
 

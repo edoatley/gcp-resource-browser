@@ -1,0 +1,98 @@
+{
+  "_comment": [
+    "Default-suppressed resources: high-volume, low-signal rows that drown an unfiltered",
+    "search. Every rule was derived from a census of a real estate (515 resources, 37 types)",
+    "and carries the reason it is here, so the list stays reviewable rather than folklore.",
+    "",
+    "A rule matches an asset_type exactly. An optional `name` regex narrows it to a subset,",
+    "which is how auto-created resources are hidden while user-created ones of the same type",
+    "are kept -- a default VPC subnet is noise, a subnet someone built is not.",
+    "",
+    "Nothing here is ever hidden from --show-all / ?show_all=true, and the count of what was",
+    "`reason` is shown to users and must stay short; `note` records why the rule exists and is documentation only."
+  ],
+  "rules": [
+    {
+      "asset_type": "serviceusage.googleapis.com/Service",
+      "reason": "enabled API services",
+      "note": "not resources; 42% of a typical estate"
+    },
+    {
+      "asset_type": "artifactregistry.googleapis.com/DockerImage",
+      "reason": "container image layers",
+      "note": "the Repository is the resource"
+    },
+    {
+      "asset_type": "run.googleapis.com/Revision",
+      "reason": "Cloud Run revisions",
+      "note": "per-deploy rows; the Service is the resource"
+    },
+    {
+      "asset_type": "secretmanager.googleapis.com/SecretVersion",
+      "reason": "secret versions",
+      "note": "the Secret is the resource"
+    },
+    {
+      "asset_type": "cloudkms.googleapis.com/CryptoKeyVersion",
+      "reason": "KMS key versions",
+      "note": "the CryptoKey is the resource"
+    },
+    {
+      "asset_type": "cloudbilling.googleapis.com/ProjectBillingInfo",
+      "reason": "billing metadata",
+      "note": "project metadata, not a resource"
+    },
+    {
+      "asset_type": "compute.googleapis.com/InstanceSettings",
+      "reason": "compute project settings",
+      "note": "project metadata, not a resource"
+    },
+    {
+      "asset_type": "compute.googleapis.com/Project",
+      "reason": "compute project record",
+      "note": "per-project compute settings, not a resource"
+    },
+    {
+      "asset_type": "dataplex.googleapis.com/EntryGroup",
+      "name": "^@",
+      "reason": "system entry groups",
+      "note": "auto-created (@storage, @bigquery)"
+    },
+    {
+      "asset_type": "compute.googleapis.com/Route",
+      "name": "^default-route-",
+      "reason": "default routes",
+      "note": "auto-created; user-defined routes are kept"
+    },
+    {
+      "asset_type": "compute.googleapis.com/Subnetwork",
+      "name": "^default$",
+      "reason": "default subnets",
+      "note": "auto-created, one per region; custom subnets are kept"
+    },
+    {
+      "asset_type": "compute.googleapis.com/Network",
+      "name": "^default$",
+      "reason": "the default VPC",
+      "note": "auto-created; custom networks are kept"
+    },
+    {
+      "asset_type": "compute.googleapis.com/Firewall",
+      "name": "^default-allow-",
+      "reason": "default firewall rules",
+      "note": "auto-created; custom rules are kept"
+    },
+    {
+      "asset_type": "logging.googleapis.com/LogSink",
+      "name": "^_(Required|Default)$",
+      "reason": "system log sinks",
+      "note": "_Required and _Default; user sinks are kept"
+    },
+    {
+      "asset_type": "logging.googleapis.com/LogBucket",
+      "name": "^_(Required|Default)$",
+      "reason": "system log buckets",
+      "note": "_Required and _Default; user buckets are kept"
+    }
+  ]
+}

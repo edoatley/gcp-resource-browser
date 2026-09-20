@@ -61,6 +61,8 @@ the user runs `gcloud auth application-default login` first. This is a deliberat
   `search_all_resources`, flattens hits into Pydantic models, and translates
   `google.api_core` exceptions into the domain errors declared there.
 - `app/query.py` — compiles filters into CAI query syntax. See the warning below.
+- `app/noise.py` + `app/noise_rules.json` — default-suppressed low-signal resources.
+- `app/config.py` — site overrides for the asset-type mapping and noise rules.
 - `app/params.py` — `SearchFilters` (what a search takes) and `Help` (how each filter is
   described). Both surfaces read from here.
 - `app/asset_types.json` — the friendly-name mapping, loaded by `core.py` and read with `jq`
@@ -111,6 +113,18 @@ reduction" filter bypassed via `--show-all` / `?show_all=true`; label/region fil
 cross-project search; aggregated endpoints. **Check `docs/DELIVERY_PLAN.md` before assuming a
 missing feature is out of scope** — it phases this work and records the sequencing rationale. Keep its checkboxes
 current as phases land, and keep the status note near the top of `README.md` in step.
+
+**Two filtering mechanisms, deliberately different.** User filters (`app/query.py`) are always
+compiled into the CAI query and evaluated server-side. Noise rules (`app/noise.py`) are applied
+client-side to results as they stream back — forced, not chosen: `assetType` is not a queryable
+CAI field and `asset_types` is an include list with no exclusion. A user filter narrows what is
+*fetched*; a noise rule hides low-value rows from a result asked for broadly. Because of this,
+`limit` caps *visible* results, and the pager is consumed lazily.
+
+**Never weaken the two noise invariants:** `--show-all` / `?show_all=true` disables every rule,
+and what was suppressed is always reported with reasons. An audit tool that silently drops rows
+is worse than one that shows too many. Suppression currently removes ~84% of a real estate, so
+a bug here is not a small matter.
 
 **`app/query.py` is the highest-risk code here.** Filters are compiled into CAI query syntax
 and evaluated server-side — never filtered locally, which would mean fetching an org-wide

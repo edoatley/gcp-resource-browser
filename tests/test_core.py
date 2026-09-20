@@ -185,11 +185,19 @@ def test_bad_filter_raises_before_calling_cai() -> None:
     assert client.last_request is None
 
 
-def test_empty_type_list_is_rejected() -> None:
-    client = FakeAssetClient()
-    with pytest.raises(core.UnknownResourceTypeError):
-        core.search_resources(filters(types=()), client=client)
-    assert client.last_request is None
+def test_empty_type_list_searches_every_type() -> None:
+    """Phase 3 reverses Phase 2 here: no type means all types.
+
+    CAI searches every supported asset type when `asset_types` is empty. Only
+    usable because noise reduction makes the result readable.
+    """
+    client = FakeAssetClient(results=[make_search_result()])
+
+    result = core.search_resources(filters(types=()), client=client)
+
+    assert list(client.last_request.asset_types) == []
+    assert result.asset_types == []
+    assert len(result.resources) == 1
 
 
 def test_disabled_api_is_not_reported_as_a_permission_problem() -> None:

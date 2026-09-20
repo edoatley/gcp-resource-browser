@@ -10,7 +10,6 @@ Discovery is always a single scope-wide CAI search. See docs/PRD.md.
 
 from __future__ import annotations
 
-import itertools
 import json
 import re
 from collections.abc import Sequence
@@ -22,7 +21,9 @@ from google.api_core import exceptions as gcp_exceptions
 from google.cloud import asset_v1
 from google.rpc.error_details_pb2 import ErrorInfo
 
+from app.config import load_config
 from app.models import Resource
+from app.noise import NoiseFilter
 from app.params import SearchFilters
 from app.query import QueryError, build_query
 
@@ -35,7 +36,10 @@ ASSET_TYPES_FILE = Path(__file__).with_name("asset_types.json")
 
 def _load_asset_types() -> dict[str, str]:
     with ASSET_TYPES_FILE.open() as handle:
-        return dict(json.load(handle)["types"])
+        types = dict(json.load(handle)["types"])
+    # Site config adds names; it never needs to restate the defaults.
+    types.update(load_config().extra_asset_types)
+    return types
 
 
 ASSET_TYPES: dict[str, str] = _load_asset_types()
@@ -112,6 +116,8 @@ class SearchResult:
     truncated: bool
     query: str
     asset_types: list[str]
+    suppressed: int = 0
+    suppressed_summary: str = ""
 
 
 @lru_cache(maxsize=1)
@@ -179,10 +185,10 @@ def resolve_asset_types(resource_types: Sequence[str]) -> list[str]:
             f"Pass [{resource_types!r}]."
         )
     if not resource_types:
-        raise UnknownResourceTypeError(
-            "At least one resource type is required. "
-            f"Choose from: {', '.join(sorted(ASSET_TYPES))}."
-        )
+        # No type means every type: CAI searches all supported asset types when
+        # `asset_types` is empty. Only usable because noise reduction makes the
+        # result readable -- the two ship together for that reason.
+        return []
     resolved = [resolve_asset_type(t) for t in resource_types]
     return list(dict.fromkeys(resolved))
 
@@ -343,19 +349,31 @@ def search_resources(
     )
 
     limit = filters.limit
+    noise = NoiseFilter(enabled=not filters.show_all)
+    results: list[Resource] = []
+    truncated = False
+
     try:
-        pager = client.search_all_resources(request=request)
-        # Take one more than asked for, so truncation is detected without
-        # walking the remainder of a potentially very large result set.
-        window = itertools.islice(pager, limit + 1) if limit is not None else pager
-        results = [_to_resource(item) for item in window]
+        # Suppression happens here rather than in the query, because CAI has no
+        # way to exclude an asset type. That makes `limit` a cap on *visible*
+        # results: iterate lazily, skipping noise, and stop one past the limit
+        # so truncation is detected without draining the pager.
+        for item in client.search_all_resources(request=request):
+            resource = _to_resource(item)
+            if not noise.keep(resource):
+                continue
+            if limit is not None and len(results) == limit:
+                truncated = True
+                break
+            results.append(resource)
     except gcp_exceptions.GoogleAPICallError as exc:
         raise _translate(exc, filters.scope) from exc
 
-    truncated = limit is not None and len(results) > limit
-    if truncated:
-        results = results[:limit]
-
     return SearchResult(
-        resources=results, truncated=truncated, query=query, asset_types=asset_types
+        resources=results,
+        truncated=truncated,
+        query=query,
+        asset_types=asset_types,
+        suppressed=noise.suppressed,
+        suppressed_summary=noise.summary(),
     )

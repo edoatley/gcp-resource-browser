@@ -68,6 +68,7 @@ def handle_explorer_error(request: Request, exc: core.ResourceExplorerError) -> 
 def search_resources(
     scope: str = Query(description=Help.SCOPE, examples=["projects/my-project"]),
     type: list[str] = Query(
+        default_factory=list,
         # The surface adds what only it can say: the concrete name list, which
         # belongs in the schema but would bloat `--help`.
         description=f"{Help.TYPE} Friendly names: {_TYPE_NAMES}.",
@@ -81,6 +82,7 @@ def search_resources(
     project: list[str] = Query(default_factory=list, description=Help.PROJECT),
     raw_query: str = Query(default="", description=Help.RAW_QUERY),
     limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=10_000, description=Help.LIMIT),
+    show_all: bool = Query(default=False, description=Help.SHOW_ALL),
 ) -> ResourceList:
     result = core.search_resources(
         SearchFilters(
@@ -92,6 +94,7 @@ def search_resources(
             projects=project,
             raw_query=raw_query,
             limit=limit,
+            show_all=show_all,
         )
     )
     return ResourceList(
@@ -100,6 +103,8 @@ def search_resources(
         query=result.query,
         count=len(result.resources),
         truncated=result.truncated,
+        suppressed=result.suppressed,
+        suppressed_summary=result.suppressed_summary,
         data=result.resources,
     )
 

@@ -57,6 +57,16 @@ class ResourceList(BaseModel):
     truncated: bool = Field(
         description="True when `limit` cut the result set short and more resources exist"
     )
+    suppressed: int = Field(
+        default=0,
+        description=(
+            "Resources hidden as low-signal. Always reported, never silently dropped; "
+            "pass show_all=true to include them."
+        ),
+    )
+    suppressed_summary: str = Field(
+        default="", description="Human-readable explanation of what was hidden, and why"
+    )
     data: list[Resource]
 
 

@@ -231,3 +231,65 @@ def test_long_names_do_not_starve_the_other_columns(use_fake) -> None:
     # Type and Location must survive intact even beside an overlong name.
     assert "ServiceAccount" in result.output
     assert "europe-west2" in result.output
+
+
+def test_search_without_a_type_searches_everything(use_fake) -> None:
+    fake = use_fake(FakeAssetClient(results=[make_search_result()]))
+
+    result = runner.invoke(cli_module.cli, ["search", "projects/p"])
+
+    assert result.exit_code == 0
+    assert list(fake.last_request.asset_types) == []
+
+
+def test_suppression_is_always_reported(use_fake) -> None:
+    """Hidden rows must never go unmentioned in an audit tool."""
+    use_fake(
+        FakeAssetClient(
+            results=[
+                make_search_result(asset_type="serviceusage.googleapis.com/Service", name="//x/a"),
+                make_search_result(name="//x/b", display_name="real-bucket"),
+            ]
+        )
+    )
+
+    result = runner.invoke(cli_module.cli, ["search", "projects/p"])
+
+    assert "real-bucket" in result.output
+    assert "1 hidden" in result.output
+    assert "--show-all" in result.output
+
+
+def test_show_all_flag_disables_suppression(use_fake) -> None:
+    use_fake(
+        FakeAssetClient(
+            results=[
+                make_search_result(
+                    asset_type="serviceusage.googleapis.com/Service",
+                    name="//x/a",
+                    display_name="storage-api",
+                )
+            ]
+        )
+    )
+
+    result = runner.invoke(cli_module.cli, ["search", "projects/p", "--show-all"])
+
+    assert "storage-api" in result.output
+    assert "hidden" not in result.output
+
+
+def test_fully_suppressed_result_explains_itself(use_fake) -> None:
+    """'No resources found' alone would be misleading when everything was hidden."""
+    use_fake(
+        FakeAssetClient(
+            results=[
+                make_search_result(asset_type="serviceusage.googleapis.com/Service", name="//x/a")
+            ]
+        )
+    )
+
+    result = runner.invoke(cli_module.cli, ["search", "projects/p"])
+
+    assert "after hiding 1" in result.output
+    assert "--show-all" in result.output

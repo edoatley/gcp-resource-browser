@@ -8,9 +8,9 @@ too quota-hungry to be viable.
 - **[Delivery plan](docs/DELIVERY_PLAN.md)** — phased breakdown of what ships when.
 - **[Walkthrough](docs/WALKTHROUGH.md)** — manual verification against real GCP.
 
-> **Status: usable.** Phases 0–2 are complete: free-text search, label/location/project
-> filtering compiled server-side, 20 resource types plus raw CAI types. Searching *all* types
-> with noise reduction is Phase 3. See the delivery plan for what is coming.
+> **Status: usable.** Phases 0–3 are complete: search every resource type by default with
+> noise reduction, free-text search, and label/location/project filtering compiled server-side.
+> See the delivery plan for what is coming.
 
 ## Requirements
 
@@ -69,6 +69,9 @@ needs an org to exercise.
 ### CLI
 
 ```bash
+# Everything in a scope, with low-signal resources hidden
+uv run gcp-explorer search projects/my-project
+
 # Find a resource by name across an entire organisation — one API call, not 2000
 uv run gcp-explorer search organizations/123456789 backup --type bucket
 
@@ -90,9 +93,47 @@ uv run gcp-explorer search projects/my-project --type bucket --label env=prod --
 # Single-type shorthand
 uv run gcp-explorer list-resources projects/my-project bucket
 
+# Nothing hidden
+uv run gcp-explorer search projects/my-project --show-all
+
 uv run gcp-explorer types      # list supported type names
 uv run gcp-explorer --help
 ```
+
+### Noise reduction
+
+With no `--type`, every asset type is searched — which without filtering is mostly enabled API
+services, container image layers and auto-created default routes. In a survey of a real estate
+those were 42%, 10% and 8% of all resources; suppression took **515 resources down to 84**.
+
+Rules live in `app/noise_rules.json`, each carrying the reason it exists. Seven of fifteen are
+name-scoped, so an auto-created `default` subnet is hidden while a subnet you built is kept.
+
+Two guarantees, since hiding data from an audit tool is risky: `--show-all` disables every
+rule, and what was hidden is always reported with its reasons. A result where everything was
+suppressed says so explicitly rather than claiming nothing was found.
+
+Suppression is applied to results rather than compiled into the query, because CAI has no way
+to exclude an asset type — `assetType` is not a queryable field, and `asset_types` is an
+include list. `--limit` still counts *visible* results.
+
+### Site configuration
+
+Optional. Create `gcp-explorer.json` in the working directory, or point `$GCP_EXPLORER_CONFIG`
+at one, or use `~/.config/gcp-explorer/config.json`:
+
+```json
+{
+  "asset_types": { "zone": "dns.googleapis.com/ManagedZone" },
+  "noise_rules": [
+    { "asset_type": "acme.example.com/Widget", "reason": "internal churn" }
+  ],
+  "unsuppress": ["compute.googleapis.com/Route"]
+}
+```
+
+It merges with the defaults rather than replacing them, so upgrades keep adding new ones.
+Unknown keys are rejected rather than ignored.
 
 `scope` is any CAI scope: `projects/<id>`, `folders/<id>`, or `organizations/<id>`.
 

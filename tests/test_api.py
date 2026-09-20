@@ -174,3 +174,47 @@ def test_disabled_api_is_503_not_403(client: TestClient, use_fake) -> None:
 
     assert response.status_code == 503
     assert response.json()["error"] == "api_not_enabled"
+
+
+def test_type_is_optional_and_searches_everything(client: TestClient, use_fake) -> None:
+    fake = use_fake(FakeAssetClient(results=[make_search_result()]))
+
+    response = client.get("/v1/resources", params={"scope": "projects/p"})
+
+    assert response.status_code == 200
+    assert list(fake.last_request.asset_types) == []
+
+
+def test_suppression_is_reported_in_the_body(client: TestClient, use_fake) -> None:
+    use_fake(
+        FakeAssetClient(
+            results=[
+                make_search_result(asset_type="serviceusage.googleapis.com/Service", name="//x/a"),
+                make_search_result(name="//x/b"),
+            ]
+        )
+    )
+
+    body = client.get("/v1/resources", params={"scope": "projects/p"}).json()
+
+    assert body["count"] == 1
+    assert body["suppressed"] == 1
+    assert "enabled API services" in body["suppressed_summary"]
+
+
+def test_show_all_includes_suppressed_resources(client: TestClient, use_fake) -> None:
+    use_fake(
+        FakeAssetClient(
+            results=[
+                make_search_result(asset_type="serviceusage.googleapis.com/Service", name="//x/a"),
+                make_search_result(name="//x/b"),
+            ]
+        )
+    )
+
+    body = client.get(
+        "/v1/resources", params={"scope": "projects/p", "show_all": "true"}
+    ).json()
+
+    assert body["count"] == 2
+    assert body["suppressed"] == 0

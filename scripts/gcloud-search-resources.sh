@@ -73,8 +73,24 @@ fi
 QUERY=""
 [[ ${#terms[@]} -gt 0 ]] && QUERY="$(printf '%s ' "${terms[@]}")" && QUERY="${QUERY% }"
 
+# gcloud bills to its own core/project, while the tool bills to the ADC quota
+# project. Left to differ, the two sides of the comparison hit different
+# projects and one fails with SERVICE_DISABLED while the other works. Default
+# to ADC's quota project so both bill to the same place.
+BILLING_PROJECT="${BILLING_PROJECT:-$(
+  python3 -c "
+import json, os, sys
+path = os.path.expanduser('~/.config/gcloud/application_default_credentials.json')
+try:
+    print(json.load(open(path)).get('quota_project_id', ''))
+except OSError:
+    sys.exit(0)
+" 2>/dev/null
+)}"
+
 args=(--scope="$SCOPE" --asset-types="$asset_types" --format=json)
 [[ -n "$QUERY" ]] && args+=(--query="$QUERY")
+[[ -n "$BILLING_PROJECT" ]] && args+=(--billing-project="$BILLING_PROJECT")
 
 echo "gcloud query: ${QUERY:-<none>}" >&2
 

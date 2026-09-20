@@ -10,6 +10,7 @@ from app.params import SearchFilters
 from tests.conftest import (
     FakeAssetClient,
     filters,
+    make_project_result,
     make_search_result,
     service_disabled_error,
 )
@@ -222,3 +223,103 @@ def test_genuine_permission_denial_still_reports_the_scope() -> None:
     assert "roles/cloudasset.viewer" in message
     # The upstream detail is preserved rather than replaced by our guess.
     assert "caller lacks permission" in message
+
+
+# --- project identity -------------------------------------------------------
+# CAI reports `project` as a NUMBER and never reports the ID directly. Verified
+# against the live API: `project:my-project-id` matches nothing while
+# `project:123456789` matches, so an unresolved ID is a silent empty result.
+
+
+def test_project_id_is_recovered_from_the_parent_path(fake_client: FakeAssetClient) -> None:
+    result = core.search_resources(filters(), client=fake_client)
+
+    resource = result.resources[0]
+    assert resource.project == "123456", "the raw CAI number is preserved"
+    assert resource.project_id == "my-project", "the readable ID is recovered"
+
+
+def test_project_asset_takes_its_id_from_additional_attributes() -> None:
+    """A Project asset has no parent path, but carries projectId directly."""
+    client = FakeAssetClient(results=[make_project_result(project_id="edo-thing", number="99")])
+
+    result = core.search_resources(filters(types=("project",)), client=client)
+
+    assert result.resources[0].project_id == "edo-thing"
+    assert result.resources[0].project == "99"
+
+
+def test_project_id_is_none_when_the_parent_is_not_a_project() -> None:
+    """A BigQuery table's parent is its dataset. Report nothing rather than guess."""
+    client = FakeAssetClient(
+        results=[
+            make_search_result(
+                parent_full_resource_name="//bigquery.googleapis.com/projects/p/datasets/d"
+            )
+        ]
+    )
+
+    result = core.search_resources(filters(), client=client)
+
+    assert result.resources[0].project_id is None
+    assert result.resources[0].project == "123456"
+
+
+def test_project_filter_resolves_an_id_to_a_number() -> None:
+    """The bug this fixes: an ID passed through returns nothing, silently."""
+    core._PROJECT_NUMBERS.clear()
+    client = FakeAssetClient(
+        results=[make_search_result()],
+        projects=[make_project_result(project_id="edo-thing", number="734077548565")],
+    )
+
+    result = core.search_resources(filters(projects=["edo-thing"]), client=client)
+
+    assert result.query == "project:734077548565"
+    assert client.last_request.query == "project:734077548565"
+
+
+def test_project_filter_passes_a_number_through_without_a_lookup() -> None:
+    core._PROJECT_NUMBERS.clear()
+    client = FakeAssetClient(results=[])
+
+    result = core.search_resources(filters(projects=["734077548565"]), client=client)
+
+    assert result.query == "project:734077548565"
+    # One call only: no resolution lookup for something already numeric.
+    assert len(client.requests) == 1
+
+
+def test_resolved_project_numbers_are_cached() -> None:
+    """The ID -> number mapping is immutable in GCP, so caching cannot go stale."""
+    core._PROJECT_NUMBERS.clear()
+    client = FakeAssetClient(
+        results=[], projects=[make_project_result(project_id="edo-thing", number="42")]
+    )
+
+    core.search_resources(filters(projects=["edo-thing"]), client=client)
+    first = len(client.requests)
+    core.search_resources(filters(projects=["edo-thing"]), client=client)
+
+    # The second search adds one search call, not a search plus a lookup.
+    assert len(client.requests) == first + 1
+
+
+def test_unresolvable_project_fails_loudly() -> None:
+    """Better a clear error than an empty result that looks like 'nothing matched'."""
+    core._PROJECT_NUMBERS.clear()
+    client = FakeAssetClient(results=[], projects=[])
+
+    with pytest.raises(core.InvalidFilterError, match="Could not resolve project"):
+        core.search_resources(filters(projects=["no-such-project"]), client=client)
+
+
+def test_project_lookup_ignores_a_near_miss() -> None:
+    """`name:` is a word match, so the exact projectId must be confirmed."""
+    core._PROJECT_NUMBERS.clear()
+    client = FakeAssetClient(
+        results=[], projects=[make_project_result(project_id="edo-thing-staging", number="7")]
+    )
+
+    with pytest.raises(core.InvalidFilterError):
+        core.search_resources(filters(projects=["edo-thing"]), client=client)

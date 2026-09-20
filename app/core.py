@@ -40,6 +40,19 @@ def _load_asset_types() -> dict[str, str]:
 
 ASSET_TYPES: dict[str, str] = _load_asset_types()
 
+# CAI reports a resource's parent as //cloudresourcemanager.googleapis.com/projects/<id>,
+# which is the only place a human-readable project ID appears for most resources -- the
+# `project` field holds the number.
+_PROJECT_PARENT = re.compile(
+    r"^//cloudresourcemanager\.googleapis\.com/projects/(?P<project_id>[a-z][a-z0-9-]{4,28}[a-z0-9])$"
+)
+
+# Project IDs are never all-digits; project numbers always are.
+_PROJECT_NUMBER = re.compile(r"^\d+$")
+
+# Project ID -> number. Immutable in GCP, so caching cannot go stale.
+_PROJECT_NUMBERS: dict[str, str] = {}
+
 # A raw CAI asset type looks like "storage.googleapis.com/Bucket". Anything
 # containing a dot or a slash is treated as a raw type or RE2 pattern and
 # passed through untouched; bare words must resolve via ASSET_TYPES.
@@ -183,9 +196,26 @@ def validate_scope(scope: str) -> str:
     return scope
 
 
+def _project_id_of(result: asset_v1.ResourceSearchResult) -> str | None:
+    """Recover the human-readable project ID, which CAI does not report directly.
+
+    A Project asset carries it in additional_attributes; everything else carries
+    it in the parent path. Resources nested below a project (a BigQuery table
+    under a dataset, say) have a non-project parent, and get None rather than a
+    guess.
+    """
+    attributes = dict(result.additional_attributes) if result.additional_attributes else {}
+    if project_id := attributes.get("projectId"):
+        return str(project_id)
+
+    match = _PROJECT_PARENT.match(result.parent_full_resource_name or "")
+    return match.group("project_id") if match else None
+
+
 def _to_resource(result: asset_v1.ResourceSearchResult) -> Resource:
     """Flatten a CAI search result into our own model."""
     return Resource(
+        project_id=_project_id_of(result),
         full_name=result.name,
         asset_type=result.asset_type,
         display_name=result.display_name or None,
@@ -198,6 +228,73 @@ def _to_resource(result: asset_v1.ResourceSearchResult) -> Resource:
         create_time=result.create_time if "create_time" in result else None,
         parent_full_resource_name=result.parent_full_resource_name or None,
     )
+
+
+def resolve_project_filter(
+    scope: str,
+    project: str,
+    client: asset_v1.AssetServiceClient,
+) -> str:
+    """Turn a project ID into the project NUMBER that CAI's `project:` field matches.
+
+    Verified against the live API: `project:my-project-id` matches nothing,
+    while `project:123456789` matches. Passing an ID through unchanged returns
+    an empty result rather than an error -- the silent-wrong-answer failure this
+    tool exists to avoid -- so IDs are resolved rather than forwarded.
+
+    Costs one extra CAI call per distinct ID. The mapping is immutable in GCP,
+    so it is cached for the life of the process.
+    """
+    if _PROJECT_NUMBER.match(project):
+        return project
+
+    if cached := _PROJECT_NUMBERS.get(project):
+        return cached
+
+    request = asset_v1.SearchAllResourcesRequest(
+        scope=scope,
+        asset_types=["cloudresourcemanager.googleapis.com/Project"],
+        query=f'name:"{project}"',
+    )
+    for result in client.search_all_resources(request=request):
+        # `name:` is a word match, so confirm the exact ID rather than trusting it.
+        attributes = dict(result.additional_attributes) if result.additional_attributes else {}
+        if attributes.get("projectId") == project and result.project:
+            number = result.project.split("/")[-1]
+            _PROJECT_NUMBERS[project] = number
+            return number
+
+    raise InvalidFilterError(
+        f"Could not resolve project {project!r} to a project number within {scope}. "
+        "Cloud Asset Inventory matches projects by number, and the project must be "
+        "visible in the scope being searched. Pass the project number directly if you "
+        "know it."
+    )
+
+
+def _translate(exc: gcp_exceptions.GoogleAPICallError, scope: str) -> ResourceExplorerError:
+    """Map a Google exception onto a domain error.
+
+    Shared by every CAI call, so a failure during project resolution reports
+    the same way as one during the search itself.
+    """
+    if isinstance(exc, gcp_exceptions.PermissionDenied):
+        # Google returns 403 both for a disabled API and for a genuine IAM
+        # failure. Check the structured reason before assuming which.
+        disabled = _service_disabled_error(exc)
+        if disabled is not None:
+            return disabled
+        return ScopeAccessDenied(
+            f"Permission denied on {scope}. The cloudasset.assets.searchAllResources "
+            "permission (roles/cloudasset.viewer) is required on that scope. "
+            f"Upstream said: {exc.message}"
+        )
+    if isinstance(exc, gcp_exceptions.NotFound):
+        return ScopeNotFound(f"Scope {scope} was not found.")
+    if isinstance(exc, gcp_exceptions.InvalidArgument):
+        # CAI also returns this for an asset-type pattern matching nothing.
+        return InvalidFilterError(f"Cloud Asset Inventory rejected the request: {exc.message}")
+    return UpstreamError(f"Cloud Asset Inventory call failed: {exc.message}")
 
 
 def search_resources(
@@ -215,19 +312,28 @@ def search_resources(
     """
     validate_scope(filters.scope)
     asset_types = resolve_asset_types(filters.resource_types)
+    client = client or get_client()
+
+    # Project IDs must become numbers before the query is built, so the query
+    # echoed back to the caller is the one actually sent.
+    try:
+        projects = [
+            resolve_project_filter(filters.scope, project, client)
+            for project in filters.projects
+        ]
+    except gcp_exceptions.GoogleAPICallError as exc:
+        raise _translate(exc, filters.scope) from exc
 
     try:
         query = build_query(
             free_text=filters.free_text,
             labels=filters.labels,
             locations=filters.locations,
-            projects=filters.projects,
+            projects=projects,
             raw=filters.raw_query,
         )
     except QueryError as exc:
         raise InvalidFilterError(str(exc)) from exc
-
-    client = client or get_client()
 
     request = asset_v1.SearchAllResourcesRequest(
         scope=filters.scope,
@@ -243,26 +349,8 @@ def search_resources(
         # walking the remainder of a potentially very large result set.
         window = itertools.islice(pager, limit + 1) if limit is not None else pager
         results = [_to_resource(item) for item in window]
-    except gcp_exceptions.PermissionDenied as exc:
-        # Google returns 403 both for a disabled API and for a genuine IAM
-        # failure. Check the structured reason before assuming which.
-        disabled = _service_disabled_error(exc)
-        if disabled is not None:
-            raise disabled from exc
-        raise ScopeAccessDenied(
-            f"Permission denied on {filters.scope}. The cloudasset.assets.searchAllResources "
-            "permission (roles/cloudasset.viewer) is required on that scope. "
-            f"Upstream said: {exc.message}"
-        ) from exc
-    except gcp_exceptions.NotFound as exc:
-        raise ScopeNotFound(f"Scope {filters.scope} was not found.") from exc
-    except gcp_exceptions.InvalidArgument as exc:
-        # CAI also returns this for an asset-type pattern matching nothing.
-        raise InvalidFilterError(
-            f"Cloud Asset Inventory rejected the request: {exc.message}"
-        ) from exc
     except gcp_exceptions.GoogleAPICallError as exc:
-        raise UpstreamError(f"Cloud Asset Inventory call failed: {exc.message}") from exc
+        raise _translate(exc, filters.scope) from exc
 
     truncated = limit is not None and len(results) > limit
     if truncated:

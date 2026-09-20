@@ -22,7 +22,14 @@ class Resource(BaseModel):
     asset_type: str = Field(description="CAI asset type, e.g. storage.googleapis.com/Bucket")
     display_name: str | None = Field(default=None, description="Short name of the resource")
     project: str | None = Field(
-        default=None, description="Project number or ID owning the resource"
+        default=None, description="Project NUMBER owning the resource, as CAI reports it"
+    )
+    project_id: str | None = Field(
+        default=None,
+        description=(
+            "Human-readable project ID, derived from the parent resource path where CAI "
+            "exposes it. None for resources whose parent is not a project."
+        ),
     )
     location: str | None = Field(default=None, description="Region, zone, or multi-region")
     state: str | None = Field(

@@ -26,6 +26,8 @@ def make_search_result(
     project: str = "projects/123456",
     location: str = "europe-west2",
     labels: dict[str, str] | None = None,
+    parent_full_resource_name: str = "//cloudresourcemanager.googleapis.com/projects/my-project",
+    additional_attributes: dict[str, str] | None = None,
 ) -> asset_v1.ResourceSearchResult:
     """Build a real CAI result proto, so field coercion is exercised for real."""
     return asset_v1.ResourceSearchResult(
@@ -35,6 +37,23 @@ def make_search_result(
         project=project,
         location=location,
         labels=labels or {},
+        parent_full_resource_name=parent_full_resource_name,
+        # A protobuf Struct: must be set at construction, not mutated after.
+        additional_attributes=additional_attributes or {},
+    )
+
+
+def make_project_result(
+    project_id: str = "my-project", number: str = "123456"
+) -> asset_v1.ResourceSearchResult:
+    """A CAI Project asset, which carries its ID in additional_attributes."""
+    return make_search_result(
+        name=f"//cloudresourcemanager.googleapis.com/projects/{project_id}",
+        asset_type="cloudresourcemanager.googleapis.com/Project",
+        display_name="My Project",
+        project=f"projects/{number}",
+        parent_full_resource_name="",
+        additional_attributes={"projectId": project_id},
     )
 
 
@@ -49,15 +68,28 @@ class FakeAssetClient:
         self,
         results: list[asset_v1.ResourceSearchResult] | None = None,
         raises: Exception | None = None,
+        projects: list[asset_v1.ResourceSearchResult] | None = None,
     ) -> None:
         self.results = results or []
         self.raises = raises
+        # Answers the project ID -> number lookup, which is a separate CAI call.
+        self.projects = projects or []
         self.last_request: asset_v1.SearchAllResourcesRequest | None = None
+        self.requests: list[asset_v1.SearchAllResourcesRequest] = []
 
     def search_all_resources(self, request: asset_v1.SearchAllResourcesRequest):
-        self.last_request = request
+        self.requests.append(request)
         if self.raises is not None:
             raise self.raises
+        # The project ID -> number lookup is a Project search with a name: query.
+        # Discriminate on both, so a user legitimately searching for Project
+        # assets still gets `results`.
+        is_lookup = list(request.asset_types) == [
+            "cloudresourcemanager.googleapis.com/Project"
+        ] and request.query.startswith('name:"')
+        if is_lookup:
+            return iter(self.projects)
+        self.last_request = request
         return iter(self.results)
 
 

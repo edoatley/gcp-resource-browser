@@ -121,6 +121,13 @@ can never alter the query's structure, and the compiled query stays recoverable 
 API response, `--show-query` on the CLI, shown automatically on an empty filtered result). New
 filters need a test pinning the exact compiled string, and a `scripts/` equivalent.
 
+**CAI never reports a project ID, only a number.** `Resource.project` keeps the raw number;
+`Resource.project_id` is recovered from `additional_attributes.projectId` (Project assets) or
+the `parent_full_resource_name` path (everything else), and is None when the parent is not a
+project. Displays prefer the ID. Likewise `--project` resolves an ID to a number before
+querying — verified against the live API that `project:<id>` matches nothing while
+`project:<number>` matches, so forwarding an ID is a silent empty result.
+
 Results are capped (`DEFAULT_LIMIT`, 1000) so an org-wide search cannot run away. When the cap
 bites, both surfaces say so — `truncated` in the API body, a warning line in the CLI. Keep that
 property: a silently shortened list misrepresents the estate, which is the one thing this tool

@@ -66,7 +66,10 @@ def _render(result: core.SearchResult, scope: str, title: str, show_query: bool)
         return
 
     table = Table(title=title)
-    table.add_column("Resource Name", style="cyan", no_wrap=True)
+    # Sized to content rather than fixed ratios. The previous no_wrap on the
+    # name column starved the others down to ellipses ("7340775...", "Service...")
+    # as soon as several asset types were in one result set.
+    table.add_column("Resource Name", style="cyan")
     table.add_column("Type", style="blue")
     table.add_column("Project", style="magenta")
     table.add_column("Location", style="green")
@@ -76,7 +79,8 @@ def _render(result: core.SearchResult, scope: str, title: str, show_query: bool)
             item.display_name or item.full_name,
             # The asset type's short half; the domain is noise in a table.
             item.asset_type.split("/")[-1],
-            item.project,
+            # Prefer the readable ID; CAI's own `project` field is a number.
+            item.project_id or item.project,
             item.location,
         )
 

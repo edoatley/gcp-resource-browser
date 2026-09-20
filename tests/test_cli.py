@@ -172,3 +172,62 @@ def test_disabled_api_exits_with_its_own_code(use_fake) -> None:
 
     assert result.exit_code == cli_module.EXIT_NOT_CONFIGURED
     assert "gcloud services enable" in result.output
+
+
+def test_table_shows_the_project_id_not_the_number(use_fake) -> None:
+    """CAI reports a number; an operator needs the ID they recognise."""
+    use_fake(
+        FakeAssetClient(
+            results=[
+                make_search_result(
+                    project="projects/734077548565",
+                    parent_full_resource_name=(
+                        "//cloudresourcemanager.googleapis.com/projects/idp-prototype-edo"
+                    ),
+                )
+            ]
+        )
+    )
+
+    result = runner.invoke(cli_module.cli, ["list-resources", "projects/p", "bucket"])
+
+    assert "idp-prototype-edo" in result.output
+    assert "734077548565" not in result.output
+
+
+def test_table_falls_back_to_the_number_when_no_id_is_available(use_fake) -> None:
+    use_fake(
+        FakeAssetClient(
+            results=[
+                make_search_result(
+                    project="projects/734077548565",
+                    parent_full_resource_name="//bigquery.googleapis.com/projects/p/datasets/d",
+                )
+            ]
+        )
+    )
+
+    result = runner.invoke(cli_module.cli, ["list-resources", "projects/p", "bucket"])
+
+    assert "734077548565" in result.output
+
+
+def test_long_names_do_not_starve_the_other_columns(use_fake) -> None:
+    """A no_wrap name column used to squeeze every other column to an ellipsis."""
+    use_fake(
+        FakeAssetClient(
+            results=[
+                make_search_result(
+                    display_name="a-very-long-resource-name-that-would-dominate-the-table-width",
+                    asset_type="iam.googleapis.com/ServiceAccount",
+                    location="europe-west2",
+                )
+            ]
+        )
+    )
+
+    result = runner.invoke(cli_module.cli, ["list-resources", "projects/p", "bucket"])
+
+    # Type and Location must survive intact even beside an overlong name.
+    assert "ServiceAccount" in result.output
+    assert "europe-west2" in result.output

@@ -39,7 +39,10 @@ class Help:
     TERM = "Free-text term, matched across all searchable fields"
     LABEL = "Label filter, repeatable: `key=value`, or `key` to match any value"
     LOCATION = "Location filter, repeatable; several are ORed. Supports `*` wildcards."
-    PROJECT = "Project filter, repeatable; several are ORed"
+    PROJECT = (
+        "Project filter, repeatable; several are ORed. Accepts a project ID or number "
+        "(IDs are resolved to numbers, which is what CAI matches on)."
+    )
     RAW_QUERY = "Raw CAI query syntax, ANDed with the other filters"
     LIMIT = "Maximum resources to return"
 

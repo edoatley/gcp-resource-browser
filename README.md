@@ -102,6 +102,10 @@ uv run gcp-explorer --help
 kind are ORed. `--label env=prod --label tier=web` means both; `--location a --location b` means
 either.
 
+`--project` accepts either a project ID or a number. CAI only matches on the number, so IDs are
+resolved first — one extra lookup, cached, because the mapping is immutable. Passing an ID
+straight through would return an empty result rather than an error.
+
 Results are capped at 1000 by default so an org-wide search cannot run away; when the cap
 bites, the CLI says so rather than silently returning a short list. Raise it with `--limit`.
 

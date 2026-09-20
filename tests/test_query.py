@@ -110,3 +110,55 @@ def test_injection_attempt_is_neutralised() -> None:
     """A crafted value must be matched literally, not alter the query."""
     query = build_query(labels=["env=prod) OR (labels.env:dev"])
     assert query == 'labels.env:"prod) OR (labels.env:dev"'
+
+
+# --- namespaced label keys --------------------------------------------------
+# Google's own system labels are namespaced and are everywhere in a real
+# estate: cloud.googleapis.com/location, serving.knative.dev/service,
+# run.googleapis.com/startupProbeType. Verified against the live API that CAI
+# rejects them unquoted with "400 Unsupported field", so quoting is mandatory
+# rather than cosmetic.
+
+
+@pytest.mark.parametrize(
+    ("spec", "expected"),
+    [
+        (
+            "cloud.googleapis.com/location=us-central1",
+            'labels."cloud.googleapis.com/location":us-central1',
+        ),
+        (
+            "serving.knative.dev/service=sudoku-rcg",
+            'labels."serving.knative.dev/service":sudoku-rcg',
+        ),
+        (
+            "run.googleapis.com/startupProbeType=Default",
+            'labels."run.googleapis.com/startupProbeType":Default',
+        ),
+    ],
+)
+def test_namespaced_label_keys_are_quoted(spec: str, expected: str) -> None:
+    assert label_term(spec) == expected
+
+
+@pytest.mark.parametrize(
+    ("spec", "expected"),
+    [
+        ("env=prod", "labels.env:prod"),
+        ("managed_by=terraform", "labels.managed_by:terraform"),
+        ("goog-terraform-provisioned=true", "labels.goog-terraform-provisioned:true"),
+    ],
+)
+def test_plain_label_keys_stay_bare(spec: str, expected: str) -> None:
+    """Quoting a plain key is harmless but makes the query needlessly noisy."""
+    assert label_term(spec) == expected
+
+
+def test_namespaced_key_with_no_value_matches_any() -> None:
+    assert label_term("cloud.googleapis.com/location") == 'labels."cloud.googleapis.com/location":*'
+
+
+@pytest.mark.parametrize("spec", ['bad"key=x', "has space=x", "(paren)=x", "UPPER.com/x=y"])
+def test_still_rejects_keys_that_could_break_the_query(spec: str) -> None:
+    with pytest.raises(QueryError):
+        label_term(spec)

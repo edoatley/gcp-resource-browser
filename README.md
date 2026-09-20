@@ -6,6 +6,7 @@ too quota-hungry to be viable.
 
 - **[PRD](docs/PRD.md)** — requirements and the recorded architecture decisions.
 - **[Delivery plan](docs/DELIVERY_PLAN.md)** — phased breakdown of what ships when.
+- **[Walkthrough](docs/WALKTHROUGH.md)** — manual verification against real GCP.
 
 > **Status: usable.** Phases 0–2 are complete: free-text search, label/location/project
 > filtering compiled server-side, 20 resource types plus raw CAI types. Searching *all* types
@@ -101,6 +102,10 @@ uv run gcp-explorer --help
 **Filters** combine as you would expect: different kinds are ANDed, repeated values of the same
 kind are ORed. `--label env=prod --label tier=web` means both; `--location a --location b` means
 either.
+
+Label keys may be namespaced. Google's own system labels look like
+`cloud.googleapis.com/location` and `serving.knative.dev/service`; CAI rejects these unless the
+key is quoted, which the tool handles for you.
 
 `--project` accepts either a project ID or a number. CAI only matches on the number, so IDs are
 resolved first — one extra lookup, cached, because the mapping is immutable. Passing an ID

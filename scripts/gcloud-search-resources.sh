@@ -56,11 +56,21 @@ done
 # Build the query independently of the tool's compiler.
 terms=()
 [[ -n "$TERM" ]] && terms+=("$TERM")
+# CAI requires a namespaced label key to be quoted -- `cloud.googleapis.com/location`
+# unquoted is a 400. Plain keys are left bare.
+label_field() {
+  if [[ "$1" =~ ^[a-z][a-z0-9_-]*$ ]]; then
+    echo "labels.$1"
+  else
+    echo "labels.\"$1\""
+  fi
+}
+
 for spec in "${LABELS[@]+"${LABELS[@]}"}"; do
   if [[ "$spec" == *=* ]]; then
-    terms+=("labels.${spec%%=*}:${spec#*=}")
+    terms+=("$(label_field "${spec%%=*}"):${spec#*=}")
   else
-    terms+=("labels.${spec}:*")
+    terms+=("$(label_field "$spec"):*")
   fi
 done
 if [[ ${#LOCATIONS[@]} -eq 1 ]]; then

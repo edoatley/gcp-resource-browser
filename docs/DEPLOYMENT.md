@@ -10,7 +10,7 @@ docker build -t gcp-explorer .
 ```
 
 The image is a multi-stage `python:3.13-slim` build. It runs as a non-root user (`explorer`,
-uid 10001), uses `gcp-explorer` as its entrypoint, and runs `serve --host 0.0.0.0 --port 8000`
+uid 10001), uses `gcpe` as its entrypoint, and runs `serve --host 0.0.0.0 --port 8000`
 by default.
 
 ## Running locally

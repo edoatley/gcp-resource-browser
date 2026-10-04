@@ -15,7 +15,9 @@ dependencies = [
 ]
 
 [project.scripts]
-# This allows you to run the CLI globally via `uv run gcp-explorer`
+# `gcpe` is the documented name. `gcp-explorer` is kept as an alias so existing
+# scripts and habits keep working; both point at the same Typer app.
+gcpe = "app.cli:cli"
 gcp-explorer = "app.cli:cli"
 
 [build-system]

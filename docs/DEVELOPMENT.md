@@ -5,7 +5,7 @@ uv sync                          # includes the dev group (pytest, ruff)
 uv run pytest                    # no network or credentials needed
 uv run ruff check .
 uv run ruff format .
-uv run gcp-explorer --help
+uv run gcpe --help
 uv run python -m app.main --help # equivalent, without the console script
 ```
 
@@ -22,8 +22,8 @@ Two files are generated from the code and committed. CI fails if either is out o
 
 | File | Regenerate with | Changes when |
 |:---|:---|:---|
-| `openapi.yml` | `uv run gcp-explorer openapi --out openapi.yml` | Any API parameter, model or description changes |
-| `docs/CLI_REFERENCE.md` | `uv run typer app.cli utils docs --name gcp-explorer --title "CLI reference" --output docs/CLI_REFERENCE.md` | Any CLI command, flag or help text changes |
+| `openapi.yml` | `uv run gcpe openapi --out openapi.yml` | Any API parameter, model or description changes |
+| `docs/CLI_REFERENCE.md` | `uv run typer app.cli utils docs --name gcpe --title "CLI reference" --output docs/CLI_REFERENCE.md` | Any CLI command, flag or help text changes |
 
 Both contain the `Help` strings from `app/params.py`, so editing a shared description changes
 both.

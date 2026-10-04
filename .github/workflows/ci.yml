@@ -33,13 +33,13 @@ jobs:
 
       - name: Check the committed OpenAPI spec is current
         run: |
-          uv run gcp-explorer openapi --out /tmp/openapi.yml
+          uv run gcpe openapi --out /tmp/openapi.yml
           diff -u openapi.yml /tmp/openapi.yml \
-            || { echo "::error::openapi.yml is stale. Run: uv run gcp-explorer openapi --out openapi.yml"; exit 1; }
+            || { echo "::error::openapi.yml is stale. Run: uv run gcpe openapi --out openapi.yml"; exit 1; }
 
       - name: Check the committed CLI reference is current
         run: |
-          uv run typer app.cli utils docs --name gcp-explorer --title "CLI reference" --output /tmp/CLI_REFERENCE.md
+          uv run typer app.cli utils docs --name gcpe --title "CLI reference" --output /tmp/CLI_REFERENCE.md
           diff -u docs/CLI_REFERENCE.md /tmp/CLI_REFERENCE.md \
             || { echo "::error::docs/CLI_REFERENCE.md is stale. See docs/DEVELOPMENT.md#generated-files"; exit 1; }
 

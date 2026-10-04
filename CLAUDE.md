@@ -16,8 +16,8 @@ Python >= 3.13, managed with `uv`.
 uv sync                                  # includes the dev group (pytest, ruff)
 uv run pytest                            # CAI client is faked; no network or creds needed
 uv run ruff check . && uv run ruff format .
-uv run gcp-explorer list-resources projects/my-project bucket
-uv run gcp-explorer serve                # FastAPI on http://127.0.0.1:8000 (docs at /docs)
+uv run gcpe list-resources projects/my-project bucket
+uv run gcpe serve                # FastAPI on http://127.0.0.1:8000 (docs at /docs)
 ```
 
 CI (`.github/workflows/ci.yml`) runs lint, format check, tests, staleness checks on
@@ -25,8 +25,8 @@ CI (`.github/workflows/ci.yml`) runs lint, format check, tests, staleness checks
 baked into the image. If you change either surface, regenerate the matching file or CI fails:
 
 ```bash
-uv run gcp-explorer openapi --out openapi.yml
-uv run typer app.cli utils docs --name gcp-explorer --title "CLI reference" --output docs/CLI_REFERENCE.md
+uv run gcpe openapi --out openapi.yml
+uv run typer app.cli utils docs --name gcpe --title "CLI reference" --output docs/CLI_REFERENCE.md
 ```
 
 ## Documentation layout

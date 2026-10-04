@@ -31,7 +31,7 @@ trap 'rm -rf "$tmp"' EXIT
 echo "== gcloud ==" >&2
 "$HERE/gcloud-search-resources.sh" "$@" > "$tmp/gcloud.jsonl"
 
-echo "== gcp-explorer ==" >&2
+echo "== gcpe ==" >&2
 "$HERE/explorer-search-resources.sh" "$@" > "$tmp/explorer.jsonl"
 
 if diff -u "$tmp/gcloud.jsonl" "$tmp/explorer.jsonl"; then

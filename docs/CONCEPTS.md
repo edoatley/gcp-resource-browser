@@ -25,7 +25,7 @@ request.
 
 | Form | Example |
 |:---|:---|
-| Friendly name | `bucket`, `vm`, `cloudrun` (list them with `gcp-explorer types` or `GET /v1/types`) |
+| Friendly name | `bucket`, `vm`, `cloudrun` (list them with `gcpe types` or `GET /v1/types`) |
 | Raw CAI asset type | `dns.googleapis.com/ManagedZone` |
 | RE2 pattern | `compute.googleapis.com/.*` |
 

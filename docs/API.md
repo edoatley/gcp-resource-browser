@@ -4,8 +4,8 @@ A JSON API over the same core as the [CLI](CLI.md). Filter semantics (how filter
 noise reduction, IAM caveats) are in [Concepts](CONCEPTS.md).
 
 ```bash
-uv run gcp-explorer serve                       # http://127.0.0.1:8000
-uv run gcp-explorer serve --host 0.0.0.0 --port 9000
+uv run gcpe serve                       # http://127.0.0.1:8000
+uv run gcpe serve --host 0.0.0.0 --port 9000
 ```
 
 ## OpenAPI spec
@@ -18,7 +18,7 @@ uv run gcp-explorer serve --host 0.0.0.0 --port 9000
 | `http://127.0.0.1:8000/openapi.json` | The live schema |
 | [`openapi.yml`](../openapi.yml) | The committed spec, for code generation. CI fails if it differs from the code. |
 
-Regenerate it after changing the API with `uv run gcp-explorer openapi --out openapi.yml`.
+Regenerate it after changing the API with `uv run gcpe openapi --out openapi.yml`.
 
 ## Endpoints
 

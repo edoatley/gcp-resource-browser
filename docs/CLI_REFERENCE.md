@@ -5,7 +5,7 @@ GCP Resource Explorer CLI
 **Usage**:
 
 ```console
-$ gcp-explorer [OPTIONS] COMMAND [ARGS]...
+$ gcpe [OPTIONS] COMMAND [ARGS]...
 ```
 
 **Options**:
@@ -23,7 +23,7 @@ $ gcp-explorer [OPTIONS] COMMAND [ARGS]...
 * `types`: List the friendly resource-type names this...
 * `serve`: Run the FastAPI server.
 
-## `gcp-explorer search`
+## `gcpe search`
 
 Search resources across a scope, with filters applied server-side.
 
@@ -32,7 +32,7 @@ With no --type, searches every asset type and hides low-signal resources.
 **Usage**:
 
 ```console
-$ gcp-explorer search [OPTIONS] {scope} [term]
+$ gcpe search [OPTIONS] {scope} [term]
 ```
 
 **Arguments**:
@@ -58,14 +58,14 @@ $ gcp-explorer search [OPTIONS] {scope} [term]
 * `--cache-ttl <float range>`: Seconds to cache identical searches. 0 (the default) disables it -- an audit tool should not answer from a stale cache unless asked to.  [default: 0.0; x&gt;=0]
 * `--help`: Show this message and exit.
 
-## `gcp-explorer list-resources`
+## `gcpe list-resources`
 
 Query one resource type and print a table (single-type form of `search`).
 
 **Usage**:
 
 ```console
-$ gcp-explorer list-resources [OPTIONS] {scope} {resource_type}
+$ gcpe list-resources [OPTIONS] {scope} {resource_type}
 ```
 
 **Arguments**:
@@ -80,14 +80,14 @@ $ gcp-explorer list-resources [OPTIONS] {scope} {resource_type}
 * `--show-all`: Include resources hidden by default (enabled API services, image layers, auto-created default routes and subnets, and similar)
 * `--help`: Show this message and exit.
 
-## `gcp-explorer summary`
+## `gcpe summary`
 
 Count resources in a scope by type, project and location.
 
 **Usage**:
 
 ```console
-$ gcp-explorer summary [OPTIONS] {scope} [term]
+$ gcpe summary [OPTIONS] {scope} [term]
 ```
 
 **Arguments**:
@@ -105,7 +105,7 @@ $ gcp-explorer summary [OPTIONS] {scope} [term]
 * `-o, --output <table|json|csv>`: Output format  [default: table]
 * `--help`: Show this message and exit.
 
-## `gcp-explorer openapi`
+## `gcpe openapi`
 
 Export the API&#x27;s OpenAPI specification.
 
@@ -115,7 +115,7 @@ committed openapi.yml, which is what downstream codegen consumes.
 **Usage**:
 
 ```console
-$ gcp-explorer openapi [OPTIONS]
+$ gcpe openapi [OPTIONS]
 ```
 
 **Options**:
@@ -123,28 +123,28 @@ $ gcp-explorer openapi [OPTIONS]
 * `--out <path>`: Where to write the specification  [default: openapi.yml]
 * `--help`: Show this message and exit.
 
-## `gcp-explorer types`
+## `gcpe types`
 
 List the friendly resource-type names this tool understands.
 
 **Usage**:
 
 ```console
-$ gcp-explorer types [OPTIONS]
+$ gcpe types [OPTIONS]
 ```
 
 **Options**:
 
 * `--help`: Show this message and exit.
 
-## `gcp-explorer serve`
+## `gcpe serve`
 
 Run the FastAPI server.
 
 **Usage**:
 
 ```console
-$ gcp-explorer serve [OPTIONS]
+$ gcpe serve [OPTIONS]
 ```
 
 **Options**:

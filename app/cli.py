@@ -17,9 +17,16 @@ from rich.table import Table
 from app import core
 from app.aggregate import summarise
 from app.fanout import DEFAULT_MAX_CONCURRENCY, search_scopes
-from app.gcloud import search_command
-from app.output import OutputFormat, summary_to_csv, to_csv, to_json
-from app.params import DEFAULT_LIMIT, Help, SearchFilters
+from app.gcloud import grants_command, search_command
+from app.output import (
+    OutputFormat,
+    grants_to_csv,
+    roles_to_csv,
+    summary_to_csv,
+    to_csv,
+    to_json,
+)
+from app.params import DEFAULT_LIMIT, GrantFilters, Help, SearchFilters
 
 cli = typer.Typer(help="GCP Resource Explorer CLI", no_args_is_help=True)
 console = Console()
@@ -405,6 +412,142 @@ def summary_command(
         for key, count in counts.items():
             table.add_row(key.split("/")[-1] if title == "By type" else key, str(count))
         console.print(table)
+
+
+def _risk_style(risk: str) -> str:
+    return {"high": "bold red", "medium": "yellow"}.get(risk, "")
+
+
+@cli.command("roles")
+def roles_command(
+    risk: str = typer.Option("high", "--risk", "-r", help=Help.RISK),
+    show_all: bool = typer.Option(False, "--show-all", help=Help.SHOW_ALL_AGENTS),
+    output: OutputFormat = typer.Option(OutputFormat.TABLE, "--output", "-o", help=Help.OUTPUT),
+) -> None:
+    """List IAM roles classed as risky, and the permissions that make them so.
+
+    A role's risk is the highest risk of any permission it contains. The rules
+    and the sources behind them are in docs/ROLE_RISK.md.
+    """
+    try:
+        with console.status("Reading the IAM role catalogue..."):
+            roles = core.list_risky_roles(risk, show_all=show_all)
+    except core.ResourceExplorerError as exc:
+        raise _fail(exc) from exc
+
+    if output is OutputFormat.JSON:
+        print(roles.model_dump_json(indent=2))
+        return
+    if output is OutputFormat.CSV:
+        print(roles_to_csv(roles), end="")
+        if roles.suppressed_summary:
+            err_console.print(roles.suppressed_summary)
+        return
+
+    table = Table(title=f"IAM roles at {roles.min_risk} risk or above")
+    table.add_column("Role", style="cyan", no_wrap=True)
+    table.add_column("Risk")
+    table.add_column("Because it can", overflow="fold")
+    for role in roles.data:
+        table.add_row(
+            role.name,
+            f"[{_risk_style(role.risk)}]{role.risk}[/]",
+            "\n".join(f"{p.permission}" for p in role.permissions),
+        )
+    console.print(table)
+    console.print(f"[dim]{roles.count} role(s). Sources: docs/ROLE_RISK.md[/dim]")
+    if roles.suppressed_summary:
+        console.print(f"[dim]{roles.suppressed_summary}[/dim]")
+
+
+@cli.command("grants")
+def grants_command_cli(
+    scope: str = typer.Argument(..., help=Help.SCOPE),
+    role_risk: str = typer.Option("high", "--role-risk", "-r", help=Help.RISK),
+    member_type: list[str] = typer.Option([], "--member-type", "-m", help=Help.MEMBER_TYPE),
+    by: str | None = typer.Option(None, "--by", help=Help.GROUP_BY),
+    show_all: bool = typer.Option(False, "--show-all", help=Help.SHOW_ALL_AGENTS),
+    limit: int = typer.Option(DEFAULT_LIMIT, "--limit", "-n", min=1, help=Help.LIMIT),
+    output: OutputFormat = typer.Option(OutputFormat.TABLE, "--output", "-o", help=Help.OUTPUT),
+    show_gcloud: bool = typer.Option(
+        False,
+        "--show-gcloud",
+        help="Print the equivalent `gcloud asset search-all-iam-policies` command(s)",
+    ),
+) -> None:
+    """Find principals holding risky roles across a scope.
+
+    Matching is by permission, so custom roles are covered. Search the
+    organization to include grants made at every level.
+    """
+    billing_project = core.adc_quota_project() if show_gcloud else None
+    try:
+        with console.status(f"Searching {scope} for {role_risk}-risk grants..."):
+            result = core.search_grants(
+                GrantFilters(
+                    scope=scope,
+                    min_risk=role_risk,
+                    member_types=member_type,
+                    show_all=show_all,
+                    limit=limit,
+                    group_by=by,
+                )
+            )
+    except core.ResourceExplorerError as exc:
+        raise _fail(exc) from exc
+
+    if show_gcloud:
+        _print_gcloud(grants_command(scope, result.queries, billing_project), output)
+
+    notes = [result.coverage_note]
+    if result.truncated:
+        notes.append(f"Showing the first {limit} grants; more exist. Use --limit to raise the cap.")
+    if result.suppressed_summary:
+        notes.append(result.suppressed_summary)
+
+    if output is not OutputFormat.TABLE:
+        print(
+            result.model_dump_json(indent=2, exclude_none=True)
+            if output is OutputFormat.JSON
+            else grants_to_csv(result),
+            end="\n" if output is OutputFormat.JSON else "",
+        )
+        for note in notes:
+            err_console.print(note)
+        return
+
+    if not result.grants:
+        console.print(f"[green]No {result.min_risk}-risk grants found.[/green]")
+    elif result.groups is not None:
+        table = Table(title=f"{result.min_risk.capitalize()}-risk grants in {scope}, by {by}")
+        table.add_column(by.capitalize(), style="cyan", overflow="fold")
+        table.add_column("Risk")
+        table.add_column("Roles" if by == "member" else "Members", no_wrap=by == "member")
+        table.add_column("Resources", justify="right")
+        for group in result.groups:
+            table.add_row(
+                group.key,
+                f"[{_risk_style(group.highest_risk)}]{group.highest_risk}[/]",
+                "\n".join(group.roles or group.members or []),
+                str(group.resource_count),
+            )
+        console.print(table)
+    else:
+        table = Table(title=f"{result.min_risk.capitalize()}-risk grants in {scope}")
+        table.add_column("Member", style="cyan", overflow="fold")
+        table.add_column("Role", style="magenta", no_wrap=True)
+        table.add_column("Risk")
+        table.add_column("On", overflow="fold")
+        for grant in result.grants:
+            table.add_row(
+                grant.member,
+                grant.role + (" [dim](conditional)[/dim]" if grant.condition else ""),
+                f"[{_risk_style(grant.risk)}]{grant.risk}[/]",
+                grant.resource.removeprefix("//"),
+            )
+        console.print(table)
+    for note in notes:
+        console.print(f"[dim]{note}[/dim]")
 
 
 @cli.command("openapi")

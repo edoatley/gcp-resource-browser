@@ -77,6 +77,13 @@ class Help:
         "tool should not answer from a stale cache unless asked to."
     )
     MAX_CONCURRENCY = "Maximum concurrent scope searches when several scopes are given"
+    RISK = "Lowest role risk to include: `high`, or `medium` for medium and high"
+    MEMBER_TYPE = (
+        "Principal type to include, repeatable: user, group, serviceAccount, domain, "
+        "allUsers, allAuthenticatedUsers, principal, principalSet. Omit for all."
+    )
+    GROUP_BY = "Roll grants up by `member` (who holds what) or `role` (who holds each role)"
+    SHOW_ALL_AGENTS = "Include Google-managed service agents, hidden by default"
     SHOW_ALL = (
         "Include resources hidden by default (enabled API services, image layers, "
         "auto-created default routes and subnets, and similar)"
@@ -104,3 +111,15 @@ class SearchFilters:
     sort: Sequence[str] = field(default_factory=tuple)
     include_iam: bool = False
     cache_ttl: float = 0.0
+
+
+@dataclass(frozen=True)
+class GrantFilters:
+    """A search for principals holding risky roles."""
+
+    scope: str
+    min_risk: str = "high"
+    member_types: Sequence[str] = field(default_factory=tuple)
+    show_all: bool = False
+    limit: int | None = DEFAULT_LIMIT
+    group_by: str | None = None

@@ -12,7 +12,7 @@ import io
 import json
 from enum import StrEnum
 
-from app.models import Resource, Summary
+from app.models import GrantList, Resource, RoleList, Summary
 
 
 class OutputFormat(StrEnum):
@@ -71,4 +71,44 @@ def summary_to_csv(summary: Summary) -> str:
     ):
         for key, count in counts.items():
             writer.writerow((dimension, key, count))
+    return buffer.getvalue()
+
+
+GRANT_CSV_COLUMNS = (
+    "risk",
+    "member",
+    "member_type",
+    "role",
+    "resource",
+    "asset_type",
+    "matched_permissions",
+    "condition",
+)
+
+
+def grants_to_csv(grants: GrantList) -> str:
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=GRANT_CSV_COLUMNS, extrasaction="ignore")
+    writer.writeheader()
+    for grant in grants.grants:
+        row = grant.model_dump(mode="json")
+        row["matched_permissions"] = " ".join(row["matched_permissions"])
+        writer.writerow(row)
+    return buffer.getvalue()
+
+
+def roles_to_csv(roles: RoleList) -> str:
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(("name", "title", "risk", "permissions", "sources"))
+    for role in roles.data:
+        writer.writerow(
+            (
+                role.name,
+                role.title or "",
+                role.risk,
+                " ".join(p.permission for p in role.permissions),
+                " ".join(sorted({s for p in role.permissions for s in p.sources})),
+            )
+        )
     return buffer.getvalue()

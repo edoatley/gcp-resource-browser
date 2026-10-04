@@ -138,3 +138,11 @@ polling of the same search.
 
 CAI is a near-real-time index, not a live read of each service. A resource created or deleted
 moments ago may not appear yet. The [PRD](PRD.md) explains why this trade-off was accepted.
+
+## Role risk
+
+`roles` and `grants` classify IAM roles as `high` or `medium` risk **by the permissions they
+contain**. A role is as risky as its riskiest permission. The rules, the reasons and the quoted
+sources (Google's IAM documentation, the CIS GCP Benchmark, and Rhino Security Labs'
+privilege-escalation research) are in [Role risk](ROLE_RISK.md). A risk filter means "at least":
+`medium` includes `high`.

@@ -17,8 +17,8 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from app import core
 from app.aggregate import summarise
-from app.models import ErrorResponse, ResourceList, Summary
-from app.params import DEFAULT_LIMIT, Help, SearchFilters
+from app.models import ErrorResponse, GrantList, ResourceList, RoleList, Summary
+from app.params import DEFAULT_LIMIT, GrantFilters, Help, SearchFilters
 
 # Precomputed for the OpenAPI descriptions below, which are evaluated at import.
 _TYPE_NAMES = ", ".join(sorted(core.ASSET_TYPES))
@@ -201,6 +201,68 @@ def summary(
         )
     )
     return summarise(scope, result.resources, result.suppressed)
+
+
+@app.get(
+    "/v1/roles",
+    response_model=RoleList,
+    responses={
+        400: {"model": ErrorResponse, "description": "Unknown risk level"},
+        502: {"model": ErrorResponse, "description": "IAM role listing failed"},
+        503: {"model": ErrorResponse, "description": "IAM API not enabled"},
+    },
+    summary="List IAM roles classed as risky",
+)
+def list_roles(
+    risk: str = Query(default="high", description=Help.RISK, examples=["high"]),
+    show_all: bool = Query(default=False, description=Help.SHOW_ALL_AGENTS),
+) -> RoleList:
+    """Predefined roles containing at least one permission at or above `risk`.
+
+    A role's risk is the highest risk of any permission it contains. Each
+    permission carries its reason and source ids; `sources` quotes each source.
+    """
+    return core.list_risky_roles(risk, show_all=show_all)
+
+
+@app.get(
+    "/v1/grants",
+    response_model=GrantList,
+    response_model_exclude_none=True,
+    responses={
+        400: {"model": ErrorResponse, "description": "Bad scope, risk, member type or group_by"},
+        403: {"model": ErrorResponse, "description": "Caller lacks Cloud Asset Viewer"},
+        404: {"model": ErrorResponse, "description": "Scope not found"},
+        502: {"model": ErrorResponse, "description": "Cloud Asset Inventory call failed"},
+        503: {"model": ErrorResponse, "description": "Cloud Asset API not enabled"},
+    },
+    summary="Find principals holding risky roles",
+)
+def list_grants(
+    scope: str = Query(description=Help.SCOPE, examples=["organizations/123"]),
+    role_risk: str = Query(default="high", description=Help.RISK, examples=["high"]),
+    member_type: list[str] = Query(
+        default_factory=list, description=Help.MEMBER_TYPE, examples=[["user", "group"]]
+    ),
+    group_by: str | None = Query(default=None, description=Help.GROUP_BY, examples=["member"]),
+    show_all: bool = Query(default=False, description=Help.SHOW_ALL_AGENTS),
+    limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=10_000, description=Help.LIMIT),
+) -> GrantList:
+    """Every principal holding a role at or above `role_risk`, matched by permission.
+
+    Read `coverage_note`: a project or folder scope cannot see grants made
+    above it, billing account IAM is not included, and groups are not expanded.
+    """
+    return core.search_grants(
+        GrantFilters(
+            scope=scope,
+            min_risk=role_risk,
+            member_types=member_type,
+            show_all=show_all,
+            limit=limit,
+            group_by=group_by,
+        )
+    )
 
 
 @app.get("/v1/types", summary="List supported resource-type names")

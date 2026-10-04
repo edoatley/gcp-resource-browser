@@ -9,7 +9,8 @@ whole project, folder or organisation, with filters evaluated server-side.
 > noise reduction, server-side filtering and sorting, IAM enrichment, aggregated summaries, and
 > JSON/CSV output, concurrent multi-scope search, streaming, and a container image with CI.
 > Phase 4's tuning is built but its baseline still needs measuring on a real organisation â€”
-> run `scripts/benchmark.py` there. See the [delivery plan](docs/DELIVERY_PLAN.md).
+> run `scripts/benchmark.py` there. Phase 8 adds high-risk role and grant review; billing-account
+> IAM and group expansion are still to come. See the [delivery plan](docs/DELIVERY_PLAN.md).
 
 ## Quickstart
 
@@ -22,6 +23,7 @@ gcloud auth application-default login     # see docs/GCP_SETUP.md for the full s
 uv run gcpe search projects/my-project                       # everything, noise hidden
 uv run gcpe search organizations/123 backup --type bucket    # one call, whole org
 uv run gcpe summary organizations/123                        # counts by type/project/location
+uv run gcpe grants organizations/123 --by member             # who holds high-risk roles
 
 uv run gcpe serve                                            # API on http://127.0.0.1:8000
 curl 'http://127.0.0.1:8000/v1/resources?scope=projects/my-project&type=bucket'
@@ -41,6 +43,7 @@ must be enabled on the ADC quota project. These are usually different projects â
 | [CLI reference](docs/CLI_REFERENCE.md) | Every command and flag (generated from the code) |
 | [HTTP API](docs/API.md) | Endpoints, parameters, response and error bodies |
 | [OpenAPI reference](https://edoatley.github.io/gcp-resource-browser/) | The API spec in Swagger UI, in the browser (also at `/docs` on a running server) |
+| [Role risk](docs/ROLE_RISK.md) | Which roles count as high risk, and the quoted sources behind each rule |
 | [Configuration](docs/CONFIGURATION.md) | Site config: extra types, noise rules |
 | [Deployment](docs/DEPLOYMENT.md) | Container image, Cloud Run/GKE, health probes |
 | [Architecture](docs/ARCHITECTURE.md) | How it is built, and how to extend it |
@@ -177,7 +180,23 @@ scope. The command is printed to stderr with `-o json`/`csv`, so stdout stays pa
 the tool hid rows, a comment says how many more `gcloud` will return, because `gcloud` has no
 noise reduction.
 
-**9. Use the HTTP API.** Searches, summaries and type listings are also available over HTTP (multi-scope search is CLI-only):
+**9. Review high-risk access.** See which roles count as high risk and why, then who holds
+them. Risk comes from the permissions a role contains, and the evidence for every rule is in
+[Role risk](docs/ROLE_RISK.md):
+
+```bash
+uv run gcpe roles --risk high                              # Owner, Editor, Billing Admin, Org Admin, ...
+uv run gcpe grants $SCOPE                                  # every high-risk grant
+uv run gcpe grants $SCOPE --by member                      # rolled up: what each principal holds
+uv run gcpe grants $SCOPE --member-type user --member-type group --role-risk medium
+```
+
+Google's own service agents are hidden and counted (`--show-all` includes them). Each result
+also says what the scope cannot see. In particular, searching a project misses grants made on
+its folders and organisation, so search the organisation to cover every level.
+
+**10. Use the HTTP API.** Searches, summaries, type listings, risky roles and grants are also
+available over HTTP (multi-scope search is CLI-only):
 
 ```bash
 uv run gcpe serve &
@@ -185,6 +204,8 @@ uv run gcpe serve &
 curl -s "http://127.0.0.1:8000/v1/resources?scope=$SCOPE&type=bucket" | jq '{count, query, truncated}'
 curl -s "http://127.0.0.1:8000/v1/summary?scope=$SCOPE" | jq .by_asset_type
 curl -sN "http://127.0.0.1:8000/v1/resources/stream?scope=$SCOPE" | head -5   # NDJSON, as rows arrive
+curl -s "http://127.0.0.1:8000/v1/roles?risk=high" | jq -r '.data[].name'
+curl -s "http://127.0.0.1:8000/v1/grants?scope=$SCOPE&role_risk=high&group_by=member" | jq .groups
 ```
 
 Open <http://127.0.0.1:8000/docs> to explore and call every endpoint in your browser. The

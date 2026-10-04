@@ -84,3 +84,32 @@ def test_reports_errors_without_traceback(use_fake, monkeypatch, capsys) -> None
 
     assert _explorer_search.main() == 1
     assert "explorer error" in capsys.readouterr().err
+
+
+def test_grants_helper_emits_sorted_tsv_with_agents_included(use_fake, monkeypatch, capsys) -> None:
+    """Agents must be included: gcloud cannot tell them apart, so both sides compare everything."""
+    from scripts import _explorer_grants
+    from tests.conftest import make_iam_result
+
+    owner = ["resourcemanager.projects.setIamPolicy"]
+    agent = "serviceAccount:service-1@gcp-sa-run.iam.gserviceaccount.com"
+    use_fake(
+        FakeAssetClient(
+            iam_policies=[
+                make_iam_result(
+                    resource="//r",
+                    role="roles/owner",
+                    members=("user:b@x.com", agent),
+                    matched={"roles/owner": owner},
+                )
+            ]
+        )
+    )
+    monkeypatch.setattr("sys.argv", ["_explorer_grants", "--scope", "projects/p"])
+
+    assert _explorer_grants.main() == 0
+
+    assert capsys.readouterr().out.splitlines() == [
+        f"//r\troles/owner\t{agent}",
+        "//r\troles/owner\tuser:b@x.com",
+    ]

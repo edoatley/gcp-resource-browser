@@ -21,6 +21,8 @@ command.
 | `list-resources SCOPE TYPE` | Shorthand for a single-type search |
 | `summary SCOPE [TERM]` | Counts by asset type, project and location, with no row limit |
 | `types` | List the friendly type names |
+| `roles` | List IAM roles classed as risky, and the permissions that make them so |
+| `grants SCOPE` | Find principals holding risky roles across a scope |
 | `serve` | Run the [HTTP API](API.md) (`--host`, `--port`; default `127.0.0.1:8000`) |
 | `openapi` | Write the API's OpenAPI spec (`--out`, default `openapi.yml`) |
 
@@ -155,6 +157,33 @@ gcpe summary organizations/123 --type vm --label env=prod
 `summary` counts every match, with no `--limit`, because counts from a truncated set would be
 wrong. It takes the free-text term, `--type`, `--label`, `--location`, `--project` and
 `--show-all`, the same filters as `GET /v1/summary`.
+
+## High-risk roles and grants
+
+```bash
+gcpe roles --risk high                       # which roles are high risk, and why
+gcpe roles --risk medium -o csv > roles.csv
+
+gcpe grants organizations/123                # every high-risk grant in the org
+gcpe grants organizations/123 --by member    # rolled up: what each principal holds
+gcpe grants organizations/123 --by role      # who holds each risky role
+gcpe grants organizations/123 -m user -m group --role-risk medium
+gcpe grants organizations/123 -m serviceAccount     # CIS 1.5: service accounts with admin access
+gcpe grants projects/my-project --show-gcloud       # the gcloud equivalent
+```
+
+- **Risk comes from permissions, not role names.** A role is high risk if it contains a high-risk
+  permission such as `resourcemanager.projects.setIamPolicy` or `iam.serviceAccounts.actAs`.
+  This also covers custom roles. Every rule and its quoted source is in
+  [Role risk](ROLE_RISK.md).
+- **Google service agents are hidden and counted.** `--show-all` includes them. Default service
+  accounts (`…-compute@developer…`, `…@appspot…`) are always shown, because they are yours and
+  often hold Editor.
+- **Each result ends with what it cannot see.** Searching a project misses grants on its folders
+  and organisation, billing-account IAM is not included, and groups are not expanded. Search the
+  organisation for the full picture.
+- With `-o json`/`csv`, these notes go to stderr. `--show-gcloud` prints one
+  `gcloud asset search-all-iam-policies` command per permission batch.
 
 ## Searching several scopes
 

@@ -133,3 +133,33 @@ def test_site_noise_rules_are_added(tmp_path) -> None:
     assert "serviceusage.googleapis.com/Service" in types, "defaults survive"
 
     noise.load_rules.cache_clear()
+
+
+def test_site_role_risk_rules_add_and_override(tmp_path) -> None:
+    from app import role_risk
+
+    write(
+        tmp_path,
+        {
+            "role_risk_rules": [
+                {"permission": "acme.widgets.delete", "risk": "high", "reason": "site policy"},
+                {"permission": "storage.buckets.setIamPolicy", "risk": "high", "reason": "ours"},
+            ]
+        },
+    )
+    role_risk.load_rules.cache_clear()
+
+    rules = {r.permission: r for r in role_risk.load_rules()}
+    assert rules["acme.widgets.delete"].risk is role_risk.Risk.HIGH
+    assert rules["storage.buckets.setIamPolicy"].reason == "ours", "site replaces default"
+    assert "iam.serviceAccounts.actAs" in rules, "defaults survive"
+
+    role_risk.load_rules.cache_clear()
+
+
+def test_a_role_risk_rule_needs_a_valid_level(tmp_path) -> None:
+    write(
+        tmp_path, {"role_risk_rules": [{"permission": "a.b.c", "risk": "extreme", "reason": "x"}]}
+    )
+    with pytest.raises(config.ConfigError, match="'high' or 'medium'"):
+        config.load_config()

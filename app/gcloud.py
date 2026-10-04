@@ -93,3 +93,27 @@ def search_command(
         lines.append(_command("search-all-iam-policies", iam_flags))
 
     return "\n".join(lines)
+
+
+def grants_command(scope: str, queries: Sequence[str], billing_project: str | None = None) -> str:
+    """The gcloud command(s) for a risky-grant search: one per permission batch.
+
+    gcloud returns whole policies, including bindings this tool narrows away
+    and grants to service agents it hides; the comment says so.
+    """
+    billing = [f"--billing-project={shlex.quote(billing_project)}"] if billing_project else []
+    lines = [
+        "# gcloud returns whole IAM policies: expect bindings for non-matching roles and",
+        "# Google service agents too, which this tool filters out of the rows it reports.",
+    ]
+    if len(queries) > 1:
+        lines.append(
+            f"# {len(queries)} commands: CAI caps alternations per query, "
+            "so permissions are batched."
+        )
+    for i, query in enumerate(queries):
+        if i:
+            lines.append("")
+        flags = [f"--scope={shlex.quote(scope)}", f"--query={shlex.quote(query)}", *billing]
+        lines.append(_command("search-all-iam-policies", flags))
+    return "\n".join(lines)

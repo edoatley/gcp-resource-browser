@@ -109,3 +109,102 @@ class ErrorResponse(BaseModel):
 
     error: str = Field(description="Machine-readable error code")
     detail: str = Field(description="Human-readable explanation")
+
+
+class RiskSource(BaseModel):
+    """A published source a risk rule relies on, quoted so it can be checked."""
+
+    title: str
+    url: str
+    quote: str = Field(description="The passage the rule relies on")
+
+
+class RiskyPermission(BaseModel):
+    """One permission that makes a role risky, and why."""
+
+    permission: str = Field(description="IAM permission, e.g. iam.serviceAccounts.actAs")
+    risk: str = Field(description="high or medium")
+    reason: str = Field(description="What a holder of this permission can do")
+    sources: list[str] = Field(description="Ids of the sources supporting this rule")
+
+
+class RiskyRole(BaseModel):
+    """An IAM role classified by the permissions it contains."""
+
+    name: str = Field(description="Role name, e.g. roles/owner")
+    title: str | None = Field(default=None, description="Human-readable title")
+    stage: str | None = Field(default=None, description="Launch stage, e.g. GA or DEPRECATED")
+    risk: str = Field(description="Highest risk of any permission the role contains")
+    permissions: list[RiskyPermission] = Field(description="The risky permissions it contains")
+
+
+class RoleList(BaseModel):
+    """Roles at or above a risk level."""
+
+    min_risk: str = Field(description="Lowest risk level included")
+    count: int = Field(description="Number of roles in `data`")
+    suppressed: int = Field(
+        default=0,
+        description="Service-agent roles hidden by default; show_all=true includes them",
+    )
+    suppressed_summary: str = Field(default="", description="What was hidden, and why")
+    data: list[RiskyRole]
+    sources: dict[str, RiskSource] = Field(
+        description="Every source cited by the returned roles, keyed by id"
+    )
+
+
+class Grant(BaseModel):
+    """One principal holding one risky role on one resource."""
+
+    resource: str = Field(description="Full resource name the policy is attached to")
+    asset_type: str | None = Field(default=None, description="CAI asset type of that resource")
+    role: str = Field(description="Role granted")
+    member: str = Field(description="Principal, e.g. user:a@example.com or group:ops@example.com")
+    member_type: str = Field(description="user, group, serviceAccount, domain, allUsers, ...")
+    risk: str = Field(description="Highest risk among the matched permissions")
+    matched_permissions: list[str] = Field(
+        description="Risky permissions in this role that the search matched"
+    )
+    condition: str | None = Field(
+        default=None, description="IAM condition expression, when the binding is conditional"
+    )
+
+
+class GrantGroup(BaseModel):
+    """Grants rolled up by member or by role, for an over-permissioning review."""
+
+    key: str = Field(description="The member or role grouped on")
+    highest_risk: str
+    grant_count: int
+    resource_count: int = Field(description="Distinct resources involved")
+    roles: list[str] | None = Field(default=None, description="Roles held (grouping by member)")
+    members: list[str] | None = Field(default=None, description="Holders (grouping by role)")
+
+
+class GrantList(BaseModel):
+    """Envelope returned by a high-risk grant search."""
+
+    scope: str
+    min_risk: str = Field(description="Lowest role risk included")
+    member_types: list[str] = Field(description="Member types searched; empty means all")
+    queries: list[str] = Field(
+        description=(
+            "The CAI queries sent, one per batch of permissions. CAI caps the alternations "
+            "in a single query, so a long permission list is searched in batches."
+        )
+    )
+    count: int
+    truncated: bool
+    suppressed: int = Field(
+        default=0,
+        description="Service-agent grants hidden by default; show_all=true includes them",
+    )
+    suppressed_summary: str = ""
+    coverage_note: str = Field(
+        description="What this search cannot see. Read it before treating the list as complete."
+    )
+    grants: list[Grant]
+    groups: list[GrantGroup] | None = Field(
+        default=None, description="Present when group_by was requested"
+    )

@@ -88,6 +88,9 @@ the user runs `gcloud auth application-default login` first. This is a deliberat
 - `app/config.py` — site overrides for the asset-type mapping and noise rules.
 - `app/aggregate.py` — IAM join and the summary rollup.
 - `app/output.py` — JSON/CSV emitters for the CLI.
+- `app/role_risk.py` + `app/role_risk_rules.json` — which permissions make a role high/medium
+  risk. Every rule cites a quoted source; `docs/ROLE_RISK.md` must list every rule and source
+  (a test enforces it). Change a rule only with a source.
 - `app/gcloud.py` — renders a search as its `gcloud` equivalent for `--show-gcloud`. It reuses
   the tool's compiled query, so it is a convenience and **not** a correctness check; that stays
   with the independent `scripts/gcloud-search-resources.sh`. Pin exact strings in tests.
@@ -171,6 +174,15 @@ or one filter's results will be served for another.
 Unknown fields are rejected, never dropped — a silently ignored sort gives plausible output in
 the wrong order. Note `assetType` is sortable but not queryable, which is why noise reduction
 still cannot move upstream.
+
+**Role risk is defined by permissions, never by role names.** `/v1/roles` and `/v1/grants` share
+`role_risk_rules.json`; do not add a role-name list beside it, or the two endpoints can
+disagree. `search_grants` batches permissions because CAI rejects more than 32 alternations
+per query (product of permissions × member types, verified live). IAM policy search has no
+negation, so service agents are hidden client-side with the noise invariants (counted, and
+`show_all` shows them). Every grant response carries `coverage_note`; keep it. The IAM role
+catalogue is cached 24 h by default — the deliberate exception to "cache off", because it is
+Google's reference data, not estate data. Don't extend that exception to search results.
 
 **IAM is attached-only, and must keep saying so.** `iam_note` on every IAM-bearing response
 states that inherited grants are excluded; presenting attached bindings as effective access is

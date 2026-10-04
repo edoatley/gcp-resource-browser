@@ -28,6 +28,8 @@ Regenerate it after changing the API with `uv run gcpe openapi --out openapi.yml
 | `GET /v1/resources/stream` | The same resources as newline-delimited JSON, streamed |
 | `GET /v1/summary` | Counts by asset type, project and location |
 | `GET /v1/types` | Friendly type names mapped to CAI asset types |
+| `GET /v1/roles` | IAM roles classed as risky, with the permissions and sources behind each |
+| `GET /v1/grants` | Principals holding risky roles across a scope |
 | `GET /healthz` | Liveness: `{"status": "ok"}`, makes no external calls |
 | `GET /readyz` | Readiness: `200` when ADC resolves, `503` otherwise; never calls CAI |
 
@@ -154,6 +156,106 @@ Each breakdown is sorted by count, highest first. `total` excludes suppressed re
 ```
 
 This lists friendly names only. Any raw CAI type is accepted wherever `type` is.
+
+### `GET /v1/roles`
+
+Lists predefined roles containing at least one permission at or above `risk`. Risk comes from
+permissions, not role names: see [Role risk](ROLE_RISK.md) for every rule and its quoted
+source.
+
+| Parameter | Type | Default | Description |
+|:---|:---|:---|:---|
+| `risk` | `high` \| `medium` | `high` | Lowest risk included. `medium` returns medium and high. |
+| `show_all` | bool | `false` | Include Google service-agent roles, which are hidden and counted by default |
+
+```bash
+curl -s 'http://127.0.0.1:8000/v1/roles?risk=high' | jq -r '.data[] | "\(.name)  \(.permissions | map(.permission) | join(", "))"'
+```
+
+```json
+{
+  "min_risk": "high",
+  "count": 35,
+  "suppressed": 60,
+  "suppressed_summary": "60 Google service-agent role(s) hidden. Use --show-all to include them.",
+  "data": [
+    {
+      "name": "roles/billing.admin",
+      "title": "Billing Account Administrator",
+      "stage": "GA",
+      "risk": "high",
+      "permissions": [
+        {
+          "permission": "billing.accounts.setIamPolicy",
+          "risk": "high",
+          "reason": "Can decide who administers a billing account",
+          "sources": ["gcp-billing-access"]
+        }
+      ]
+    }
+  ],
+  "sources": {
+    "gcp-billing-access": { "title": "…", "url": "https://cloud.google.com/billing/docs/how-to/billing-access", "quote": "…" }
+  }
+}
+```
+
+`sources` contains every source cited by the roles returned, each quoted. The role catalogue
+comes from the IAM API (`iam.googleapis.com` must be enabled on the quota project) and is
+cached for 24 hours.
+
+### `GET /v1/grants`
+
+Returns every principal holding a role at or above `role_risk` across `scope`. Matching is by
+permission and done by CAI, so custom roles are covered too.
+
+| Parameter | Type | Default | Description |
+|:---|:---|:---|:---|
+| `scope` | string, **required** | | Search the organization to include grants made at every level |
+| `role_risk` | `high` \| `medium` | `high` | Lowest role risk included |
+| `member_type` | repeatable | all | `user`, `group`, `serviceAccount`, `domain`, `allUsers`, `allAuthenticatedUsers`, `principal`, `principalSet` |
+| `group_by` | `member` \| `role` | | Add `groups`: what each principal holds, or who holds each role |
+| `show_all` | bool | `false` | Include grants to Google service agents |
+| `limit` | int, 1–10000 | `1000` | Maximum grants returned. `truncated` reports when more exist. |
+
+```bash
+curl -s 'http://127.0.0.1:8000/v1/grants?scope=organizations/123&role_risk=high&member_type=user&member_type=group&group_by=member'
+```
+
+```json
+{
+  "scope": "organizations/123",
+  "min_risk": "high",
+  "member_types": ["user", "group"],
+  "queries": ["policy.role.permissions:(resourcemanager.organizations.setIamPolicy OR …) memberTypes:(user OR group)"],
+  "count": 1,
+  "truncated": false,
+  "suppressed": 0,
+  "coverage_note": "Covers the organization and everything beneath it. Billing account IAM is not indexed by Cloud Asset Inventory and is not included. Group membership is not expanded: a group grant applies to every member.",
+  "grants": [
+    {
+      "resource": "//cloudresourcemanager.googleapis.com/organizations/123",
+      "asset_type": "cloudresourcemanager.googleapis.com/Organization",
+      "role": "roles/resourcemanager.organizationAdmin",
+      "member": "group:platform-admins@example.com",
+      "member_type": "group",
+      "risk": "high",
+      "matched_permissions": ["resourcemanager.folders.setIamPolicy", "resourcemanager.organizations.setIamPolicy", "resourcemanager.projects.setIamPolicy"]
+    }
+  ],
+  "groups": [
+    { "key": "group:platform-admins@example.com", "highest_risk": "high", "grant_count": 1, "resource_count": 1, "roles": ["roles/resourcemanager.organizationAdmin"] }
+  ]
+}
+```
+
+| Field | Meaning |
+|:---|:---|
+| `queries` | The CAI queries sent. CAI limits each query to 32 alternative values (permissions × member types), so longer permission lists are searched in batches. |
+| `matched_permissions` | The risky permissions in this role that CAI matched: *why* the grant is listed |
+| `condition` | The IAM condition expression, when the binding is conditional |
+| `suppressed` | Grants to Google service agents that were hidden |
+| `coverage_note` | What the search cannot see. **Read it before treating the list as complete.** |
 
 ## Errors
 

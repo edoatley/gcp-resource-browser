@@ -477,3 +477,41 @@ def test_fanout_machine_output_keeps_notes_on_stderr(use_fake) -> None:
 
     assert len(json.loads(result.stdout)) == 4
     assert "more exist" in result.stderr
+
+
+def test_show_gcloud_prints_the_equivalent_command(use_fake) -> None:
+    use_fake(FakeAssetClient(results=[make_search_result()]))
+
+    result = runner.invoke(
+        cli_module.cli,
+        ["search", "projects/p", "--type", "bucket", "--label", "env=prod", "--show-gcloud"],
+    )
+
+    assert result.exit_code == 0
+    assert "gcloud asset search-all-resources" in result.output
+    assert "--query=labels.env:prod" in result.output
+
+
+def test_show_gcloud_keeps_json_stdout_parseable(use_fake) -> None:
+    import json
+
+    use_fake(FakeAssetClient(results=[make_search_result()]))
+
+    result = runner.invoke(
+        cli_module.cli, ["search", "projects/p", "--type", "bucket", "--show-gcloud", "-o", "json"]
+    )
+
+    assert len(json.loads(result.stdout)) == 1
+    assert "gcloud asset search-all-resources" in result.stderr
+
+
+def test_show_gcloud_emits_one_command_per_scope(use_fake) -> None:
+    use_fake(FakeAssetClient(results=[make_search_result()]))
+
+    result = runner.invoke(
+        cli_module.cli,
+        ["search", "projects/a", "--also-scope", "projects/b", "--type", "bucket", "--show-gcloud"],
+    )
+
+    assert "--scope=projects/a" in result.output
+    assert "--scope=projects/b" in result.output

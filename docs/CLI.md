@@ -65,6 +65,31 @@ gcpe search projects/my-project --type bucket --label env=prod --show-query
 When a filtered search returns nothing, the query is printed automatically. That lets you tell
 "nothing matched" apart from "the filter compiled to something unexpected".
 
+### Reproducing a search in `gcloud`
+
+```bash
+gcpe search projects/my-project --type cloudrun --label env=prod --show-gcloud
+```
+
+`--show-gcloud` prints the equivalent `gcloud asset search-all-resources` command before the
+results, or to stderr with `-o json`/`csv`. It is built from what was actually sent to CAI:
+the compiled query (with project IDs already resolved to numbers), the resolved asset types and
+the sort order. It also adds:
+
+- `--billing-project` set to your ADC quota project, so the pasted command bills where the
+  tool does. `gcloud` keeps its own configured project, which may not have the Cloud Asset
+  API enabled.
+- A comment with the number of hidden rows, because `gcloud` has no noise reduction and will
+  return them.
+- `--limit` only when the result was truncated, with a note when noise reduction means the two
+  may stop at different rows.
+- The matching `search-all-iam-policies` command with `--include-iam`, and one command per
+  scope with `--also-scope`.
+
+It reuses the tool's own query compiler, so it shows what the tool did, not whether the tool
+was right. For that, use the independent `scripts/compare-resources.sh`
+([Development](DEVELOPMENT.md#checking-against-gcloud)).
+
 ### Hidden resources
 
 By default the table ends with a line such as:

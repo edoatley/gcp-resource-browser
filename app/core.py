@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
+import google.auth
 from google.api_core import exceptions as gcp_exceptions
 from google.cloud import asset_v1
 from google.rpc.error_details_pb2 import ErrorInfo
@@ -126,6 +127,22 @@ class SearchResult:
     suppressed: int = 0
     suppressed_summary: str = ""
     iam_note: str | None = None
+
+
+@lru_cache(maxsize=1)
+def adc_quota_project() -> str | None:
+    """The project ADC bills CAI calls to, or None if it cannot be read.
+
+    Reads local credentials only; no network call. Used to make a rendered
+    gcloud command bill where this tool does: the gcloud CLI keeps its own
+    config, whose project often lacks the Cloud Asset API, and the resulting
+    SERVICE_DISABLED 403 looks like the command is wrong when it is not.
+    """
+    try:
+        credentials, _ = google.auth.default()
+    except Exception:  # noqa: BLE001 - best-effort display detail, never fatal
+        return None
+    return getattr(credentials, "quota_project_id", None)
 
 
 @lru_cache(maxsize=1)
@@ -426,6 +443,15 @@ def _translate(exc: gcp_exceptions.GoogleAPICallError, scope: str) -> ResourceEx
         )
     if isinstance(exc, gcp_exceptions.NotFound):
         return ScopeNotFound(f"Scope {scope} was not found.")
+    if isinstance(exc, gcp_exceptions.InvalidArgument) and "invalid scope" in exc.message.lower():
+        # CAI's message blanks the scope ("Invalid scope . Please provide..."),
+        # and reports a nonexistent project this way rather than as NotFound.
+        # Name the scope, or with --also-scope the reader cannot tell which
+        # of several it means.
+        return InvalidScopeError(
+            f"Cloud Asset Inventory does not recognise scope {scope}: check that it exists "
+            f"and is spelled correctly. Upstream said: {exc.message}"
+        )
     if isinstance(exc, gcp_exceptions.InvalidArgument):
         # CAI also returns this for an asset-type pattern matching nothing.
         return InvalidFilterError(f"Cloud Asset Inventory rejected the request: {exc.message}")

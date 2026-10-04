@@ -64,7 +64,7 @@ so an ID passed straight through would return an empty result instead of an erro
 looks the ID up first and caches the answer for the life of the process.
 
 **The compiled query is always visible.** It is returned as `query` in API responses, printed
-by `--show-query`, and shown automatically when a filtered CLI search returns nothing. A filter
+by `--show-query` (or as a full `gcloud` command by `--show-gcloud`), and shown automatically when a filtered CLI search returns nothing. A filter
 that compiles to the wrong thing returns plausible but incomplete results, so check the query
 when a result looks short.
 

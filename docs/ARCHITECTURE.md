@@ -47,6 +47,7 @@ core so the two surfaces cannot drift apart.
 | `app/fanout.py` | Bounded concurrent search across several scopes. |
 | `app/cache.py` | Opt-in TTL response cache, inactive unless a request sets a TTL. |
 | `app/output.py` | JSON and CSV emitters for the CLI. |
+| `app/gcloud.py` | Renders a search as the equivalent `gcloud asset` command (`--show-gcloud`). |
 | `app/models.py` | Pydantic wire models: `Resource`, `ResourceList`, `Summary`, `ErrorResponse`. These also produce the OpenAPI schema. |
 | `app/asset_types.json` | Friendly name → CAI asset type. Also read by `scripts/` with `jq`. |
 | `app/cli.py`, `app/api.py` | The two surfaces. |

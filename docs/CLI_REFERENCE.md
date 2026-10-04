@@ -49,6 +49,7 @@ $ gcpe search [OPTIONS] {scope} [term]
 * `--raw-query <str>`: Raw CAI query syntax, ANDed with the other filters
 * `-n, --limit <int range>`: Maximum resources to return  [default: 1000; x&gt;=1]
 * `--show-query`: Print the CAI query the filters compiled to
+* `--show-gcloud`: Print the equivalent `gcloud asset search-all-resources` command
 * `--show-all`: Include resources hidden by default (enabled API services, image layers, auto-created default routes and subnets, and similar)
 * `--sort <str>`: Sort field, with optional ` DESC`. Repeatable for tie-breaks. One of: name, assetType, project, displayName, description, location, createTime, updateTime, state, parentFullResourceName, parentAssetType.
 * `--include-iam`: Attach each resource&#x27;s directly-attached IAM bindings. One extra call for the whole scope. Inherited bindings are not included.

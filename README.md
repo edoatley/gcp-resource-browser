@@ -139,13 +139,45 @@ uv run gcpe search $SCOPE --type bucket --type cloudrun --type topic --include-i
 ```
 
 **7. Search several scopes.** If you hold viewer on some projects but not on their organisation,
-search them all at once. Exit code `7` means some scopes failed:
+search them all at once. Use projects you can read, such as the ones `setup-gcp.sh` granted:
 
 ```bash
-uv run gcpe search projects/a --also-scope projects/b --also-scope projects/c --type bucket
+uv run gcpe search $SCOPE --also-scope projects/idp-prototype-edo --type bucket
 ```
 
-**8. Use the HTTP API.** Searches, summaries and type listings are also available over HTTP (multi-scope search is CLI-only):
+A scope that can't be searched is listed as `FAILED` and the exit code is `7`, but the others
+still return. To see this, add a project you can't read. CAI reports a nonexistent project as
+permission denied, so it doesn't reveal which projects exist:
+
+```bash
+uv run gcpe search $SCOPE --also-scope projects/does-not-exist --type bucket; echo "exit=$?"
+```
+
+**8. Get the equivalent `gcloud` command.** `--show-gcloud` prints the
+`gcloud asset search-all-resources` command that runs the same search. It includes the
+compiled query, the resolved asset types, the sort order, and your ADC quota project as
+`--billing-project`, so it works when pasted even if `gcloud` is configured with a different
+project:
+
+```bash
+uv run gcpe search $SCOPE --type cloudrun --label cloud.googleapis.com/location --show-gcloud
+```
+
+```text
+gcloud asset search-all-resources \
+    --scope=projects/my-project \
+    --asset-types=run.googleapis.com/Service \
+    --query='labels."cloud.googleapis.com/location":*' \
+    --billing-project=my-quota-project
+```
+
+Paste the command to see the same rows from `gcloud`. With `--include-iam` it also prints the
+matching `search-all-iam-policies` command. With `--also-scope` it prints one command per
+scope. The command is printed to stderr with `-o json`/`csv`, so stdout stays parseable. If
+the tool hid rows, a comment says how many more `gcloud` will return, because `gcloud` has no
+noise reduction.
+
+**9. Use the HTTP API.** Searches, summaries and type listings are also available over HTTP (multi-scope search is CLI-only):
 
 ```bash
 uv run gcpe serve &

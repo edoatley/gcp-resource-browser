@@ -20,10 +20,23 @@ uv run gcp-explorer list-resources projects/my-project bucket
 uv run gcp-explorer serve                # FastAPI on http://127.0.0.1:8000 (docs at /docs)
 ```
 
-CI (`.github/workflows/ci.yml`) runs lint, format check, tests, an `openapi.yml` staleness
-check, an image build, and a check that no credential is baked into the image. If you change
-the API surface, regenerate the spec or CI fails:
-`uv run gcp-explorer openapi --out openapi.yml`.
+CI (`.github/workflows/ci.yml`) runs lint, format check, tests, staleness checks on
+`openapi.yml` and `docs/CLI_REFERENCE.md`, an image build, and a check that no credential is
+baked into the image. If you change either surface, regenerate the matching file or CI fails:
+
+```bash
+uv run gcp-explorer openapi --out openapi.yml
+uv run typer app.cli utils docs --name gcp-explorer --title "CLI reference" --output docs/CLI_REFERENCE.md
+```
+
+## Documentation layout
+
+`README.md` is deliberately short: pitch, status note, quickstart, and an index. Detail lives in
+`docs/`: `CONCEPTS.md` holds filter semantics shared by both surfaces (the docs counterpart
+of `params.Help`, so it is not restated per surface), `CLI.md` and `API.md` are per-surface
+guides, `CLI_REFERENCE.md` is generated, and `ARCHITECTURE.md` holds the extension checklists.
+When a filter, endpoint or flag changes, update the hand-written tables in `API.md`,
+`CONCEPTS.md` and `CLI.md` as well as regenerating.
 
 The Dockerfile builds at `/app` rather than `/build` on purpose: a virtualenv's entry points
 carry an absolute shebang, so relocating `.venv` breaks every console script.
@@ -94,8 +107,9 @@ a domain error, and each surface maps it to a status code (`app.api._STATUS_BY_E
 exit code (`app.cli._EXIT_BY_ERROR`). Adding an error means adding it in all three places.
 
 **Adding a filter:** add it to `Help` and `SearchFilters` in `app/params.py`, handle it in
-`build_query`, then reference `Help.X` from both surfaces and pass it through the
-`SearchFilters(...)` each builds. Do not retype the help text — `tests/test_params.py` asserts
+`build_query`, add it to `core._cache_key`, then reference `Help.X` from both surfaces and pass
+it through the `SearchFilters(...)` each builds. The full checklist, including docs and
+`scripts/`, is in `docs/ARCHITECTURE.md`. Do not retype the help text — `tests/test_params.py` asserts
 each shared string appears verbatim in both surfaces, and will fail if you do.
 
 The two signatures stay separate on purpose. FastAPI and Typer both build their artifacts by
@@ -122,10 +136,9 @@ adding a resource type is a one-line change that lights up both surfaces.
 
 ## Not yet built
 
-Much of the PRD is unimplemented: querying *all* resource types by default with a "noise
-reduction" filter bypassed via `--show-all` / `?show_all=true`; label/region filters; free-text
-cross-project search; aggregated endpoints. **Check `docs/DELIVERY_PLAN.md` before assuming a
-missing feature is out of scope** — it phases this work and records the sequencing rationale. Keep its checkboxes
+Phases 0–3, 5 and 6 are built. Still open: Phase 4's baseline measured on a real organisation,
+effective (inherited) IAM, and the deliberately conditional Phase 7. **Check
+`docs/DELIVERY_PLAN.md` before assuming a missing feature is out of scope** — it phases this work and records the sequencing rationale. Keep its checkboxes
 current as phases land, and keep the status note near the top of `README.md` in step.
 
 **Two filtering mechanisms, deliberately different.** User filters (`app/query.py`) are always
@@ -135,9 +148,11 @@ CAI field and `asset_types` is an include list with no exclusion. A user filter 
 *fetched*; a noise rule hides low-value rows from a result asked for broadly. Because of this,
 `limit` caps *visible* results, and the pager is consumed lazily.
 
-**`core.stream_resources` is the generator; `search_resources` wraps it.** Add behaviour to
-`_prepare`/`_Prepared.iterate` so both get it. Streaming exists so a large result set need not
-be materialised before the first row.
+**`core.stream_resources` returns the row iterator; `search_resources` collects it.** Add
+behaviour to `_prepare`/`_Prepared.iterate` so both get it. Streaming exists so a large result
+set need not be materialised before the first row. `stream_resources` is deliberately *not* a
+generator function: validation must run at call time, before `/v1/resources/stream` commits to
+a 200, or a malformed request comes back as an empty stream that reads as "nothing matched".
 
 **Fan-out (`--also-scope`) is not the per-project iteration the PRD forbids** — each scope is
 still one scope-wide CAI search; only the scopes are parallel. It exists because CAI checks

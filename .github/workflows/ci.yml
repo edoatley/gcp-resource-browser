@@ -37,6 +37,12 @@ jobs:
           diff -u openapi.yml /tmp/openapi.yml \
             || { echo "::error::openapi.yml is stale. Run: uv run gcp-explorer openapi --out openapi.yml"; exit 1; }
 
+      - name: Check the committed CLI reference is current
+        run: |
+          uv run typer app.cli utils docs --name gcp-explorer --title "CLI reference" --output /tmp/CLI_REFERENCE.md
+          diff -u docs/CLI_REFERENCE.md /tmp/CLI_REFERENCE.md \
+            || { echo "::error::docs/CLI_REFERENCE.md is stale. See docs/DEVELOPMENT.md#generated-files"; exit 1; }
+
   docker:
     runs-on: ubuntu-latest
     steps:

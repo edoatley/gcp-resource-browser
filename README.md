@@ -85,28 +85,57 @@ uv run gcpe search $SCOPE --show-all      # hide nothing
 ```
 
 **4. Narrow it down.** Filters are evaluated by CAI, not locally. Different filters are ANDed
-together, and repeated values of one filter are ORed:
+together, and repeated values of one filter are ORed. A filter only returns rows if its values
+exist in your scope, so start by listing which labels are in use (`summary` from step 2 already
+shows the types and locations):
 
 ```bash
-uv run gcpe search $SCOPE backup                                # free text
-uv run gcpe search $SCOPE --type bucket --type vm               # several types
-uv run gcpe search $SCOPE --label env=prod --location 'europe-*'
-uv run gcpe search $SCOPE --type vm --label owner --show-query  # has the label at all; print the CAI query
+uv run gcpe search $SCOPE -o json | jq -r '.[].labels // {} | keys[]' | sort | uniq -c
 ```
+
+The examples below use the labels and locations of a small Cloud Run and Firebase project
+managed with Pulumi. Swap in values from your own output:
+
+```bash
+# Free text, matched across names, descriptions, labels and more
+uv run gcpe search $SCOPE pulumi
+
+# Several types at once
+uv run gcpe search $SCOPE --type cloudrun --type serviceaccount
+
+# A label value AND a location
+uv run gcpe search $SCOPE --label goog-pulumi-provisioned=true --location us-central1
+
+# Either location (repeats are ORed), restricted to three types
+uv run gcpe search $SCOPE --type bucket --type cloudrun --type topic \
+    --location us-central1 --location global
+
+# Has the label at all, whatever its value. The key is namespaced, so the tool quotes it
+uv run gcpe search $SCOPE --type cloudrun --label cloud.googleapis.com/location --show-query
+
+# Audit: resources NOT created by infrastructure-as-code, using raw CAI syntax
+uv run gcpe search $SCOPE --type bucket --type cloudrun --type topic --type serviceaccount \
+    --raw-query 'NOT labels.goog-pulumi-provisioned:*' --show-query
+```
+
+`--show-query` prints the CAI query the filters compiled to. When a filtered search finds
+nothing, the query is printed automatically, so you can tell "nothing matched" apart from "the
+filter wasn't what I meant".
 
 **5. Sort and export.** JSON and CSV go to stdout, and warnings go to stderr:
 
 ```bash
-uv run gcpe search $SCOPE --sort 'createTime DESC' -n 10
-uv run gcpe search $SCOPE --type bucket -o csv > buckets.csv
-uv run gcpe search $SCOPE --type vm -o json | jq -r '.[].display_name'
+uv run gcpe search $SCOPE --sort 'createTime DESC' -n 5     # the five newest resources
+uv run gcpe search $SCOPE --type serviceaccount -o csv > service-accounts.csv
+uv run gcpe search $SCOPE --type serviceaccount -o json | jq -r '.[].display_name'
 ```
 
 **6. See who has access.** Add IAM bindings attached to each resource. Inherited grants are
 *not* included, and the output says so:
 
 ```bash
-uv run gcpe search $SCOPE --type bucket --include-iam -o json | jq '.[] | {display_name, iam_bindings}'
+uv run gcpe search $SCOPE --type bucket --type cloudrun --type topic --include-iam -o json \
+    | jq -c '.[] | {display_name, roles: [.iam_bindings[]?.role]}'
 ```
 
 **7. Search several scopes.** If you hold viewer on some projects but not on their organisation,

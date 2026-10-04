@@ -38,7 +38,7 @@ core so the two surfaces cannot drift apart.
 
 | Module | Responsibility |
 |:---|:---|
-| `app/core.py` | Validation, type resolution, project ID↔number resolution, the CAI call, exception translation into domain errors. `stream_resources` yields rows. `search_resources` collects them and adds project IDs, IAM and caching. |
+| `app/core.py` | Also `list_risky_roles` (IAM role catalogue, cached 24 h) and `search_grants` (CAI IAM policy search, batched). Validation, type resolution, project ID↔number resolution, the CAI call, exception translation into domain errors. `stream_resources` yields rows. `search_resources` collects them and adds project IDs, IAM and caching. |
 | `app/query.py` | Compiles filters into CAI query syntax. **The highest-risk code here** (see below). |
 | `app/params.py` | `SearchFilters` (what a search takes), `Help` (how each filter is described), `SORTABLE_FIELDS`, `DEFAULT_LIMIT`. Shared by both surfaces. |
 | `app/noise.py` + `noise_rules.json` | Client-side suppression of low-signal resources. |
@@ -47,6 +47,7 @@ core so the two surfaces cannot drift apart.
 | `app/fanout.py` | Bounded concurrent search across several scopes. |
 | `app/cache.py` | Opt-in TTL response cache, inactive unless a request sets a TTL. |
 | `app/output.py` | JSON and CSV emitters for the CLI. |
+| `app/role_risk.py` + `role_risk_rules.json` | Which permissions make a role risky, with cited sources. Pure; `core` does the I/O. |
 | `app/gcloud.py` | Renders a search as the equivalent `gcloud asset` command (`--show-gcloud`). |
 | `app/models.py` | Pydantic wire models: `Resource`, `ResourceList`, `Summary`, `ErrorResponse`. These also produce the OpenAPI schema. |
 | `app/asset_types.json` | Friendly name → CAI asset type. Also read by `scripts/` with `jq`. |
@@ -113,6 +114,29 @@ them:
 - **Errors are typed.** The core raises a domain error, and each surface maps it to an exit
   code (`cli._EXIT_BY_ERROR`) or HTTP status (`api._STATUS_BY_ERROR`).
 - **The cache is off by default**, and every filter is part of its key.
+
+## Role risk is derived from permissions
+
+`/v1/roles` and `/v1/grants` share one rule set, which maps permissions to a risk level. A
+role's risk is the highest risk of any permission it holds. `/v1/roles` evaluates the rules
+against the IAM role catalogue, and `/v1/grants` compiles them into
+`policy.role.permissions:(…)` for CAI. The two cannot disagree, and custom roles are covered
+without being named. See [Role risk](ROLE_RISK.md).
+
+Four constraints shape `search_grants`, all verified against the live API:
+
+- **32 alternations per query**, counted as permissions × member types. Permissions are batched
+  to fit, and results are merged per (resource, role, member, condition).
+- **CAI returns whole policies.** Bindings are narrowed to the roles CAI reports in
+  `explanation.matched_permissions`, and members to the requested types. This narrows rows
+  already fetched; it never fetches more.
+- **No negation in IAM policy search**, so service agents are hidden client-side, counted, and
+  shown with `show_all`. These are the same invariants as noise reduction.
+- **A scope cannot see grants above it.** Every response carries a `coverage_note`.
+
+The IAM role catalogue is the **only cache that is on by default** (24 hours). It is Google's
+reference data about what roles contain, not the customer's estate, so a day-old copy cannot
+hide a fix someone is verifying. Results from estate searches stay uncached by default.
 
 ## Synchronous by design
 

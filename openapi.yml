@@ -452,6 +452,200 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /v1/roles:
+    get:
+      summary: List IAM roles classed as risky
+      description: 'Predefined roles containing at least one permission at or above
+        `risk`.
+
+
+        A role''s risk is the highest risk of any permission it contains. Each
+
+        permission carries its reason and source ids; `sources` quotes each source.'
+      operationId: list_roles_v1_roles_get
+      parameters:
+      - name: risk
+        in: query
+        required: false
+        schema:
+          type: string
+          description: 'Lowest role risk to include: `high`, or `medium` for medium
+            and high'
+          examples:
+          - high
+          default: high
+          title: Risk
+        description: 'Lowest role risk to include: `high`, or `medium` for medium
+          and high'
+      - name: show_all
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Include Google-managed service agents, hidden by default
+          default: false
+          title: Show All
+        description: Include Google-managed service agents, hidden by default
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleList'
+        '400':
+          description: Unknown risk level
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: IAM role listing failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: IAM API not enabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/grants:
+    get:
+      summary: Find principals holding risky roles
+      description: 'Every principal holding a role at or above `role_risk`, matched
+        by permission.
+
+
+        Read `coverage_note`: a project or folder scope cannot see grants made
+
+        above it, billing account IAM is not included, and groups are not expanded.'
+      operationId: list_grants_v1_grants_get
+      parameters:
+      - name: scope
+        in: query
+        required: true
+        schema:
+          type: string
+          description: 'CAI scope: organizations/<id>, folders/<id>, or projects/<id>'
+          examples:
+          - organizations/123
+          title: Scope
+        description: 'CAI scope: organizations/<id>, folders/<id>, or projects/<id>'
+      - name: role_risk
+        in: query
+        required: false
+        schema:
+          type: string
+          description: 'Lowest role risk to include: `high`, or `medium` for medium
+            and high'
+          examples:
+          - high
+          default: high
+          title: Role Risk
+        description: 'Lowest role risk to include: `high`, or `medium` for medium
+          and high'
+      - name: member_type
+        in: query
+        required: false
+        schema:
+          type: array
+          items:
+            type: string
+          description: 'Principal type to include, repeatable: user, group, serviceAccount,
+            domain, allUsers, allAuthenticatedUsers, principal, principalSet. Omit
+            for all.'
+          examples:
+          - - user
+            - group
+          title: Member Type
+        description: 'Principal type to include, repeatable: user, group, serviceAccount,
+          domain, allUsers, allAuthenticatedUsers, principal, principalSet. Omit for
+          all.'
+      - name: group_by
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Roll grants up by `member` (who holds what) or `role` (who
+            holds each role)
+          examples:
+          - member
+          title: Group By
+        description: Roll grants up by `member` (who holds what) or `role` (who holds
+          each role)
+      - name: show_all
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Include Google-managed service agents, hidden by default
+          default: false
+          title: Show All
+        description: Include Google-managed service agents, hidden by default
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 10000
+          minimum: 1
+          description: Maximum resources to return
+          default: 1000
+          title: Limit
+        description: Maximum resources to return
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GrantList'
+        '400':
+          description: Bad scope, risk, member type or group_by
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Caller lacks Cloud Asset Viewer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Scope not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Cloud Asset Inventory call failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Cloud Asset API not enabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /v1/types:
     get:
       summary: List supported resource-type names
@@ -490,6 +684,166 @@ components:
       - detail
       title: ErrorResponse
       description: Body returned with any non-2xx status.
+    Grant:
+      properties:
+        resource:
+          type: string
+          title: Resource
+          description: Full resource name the policy is attached to
+        asset_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Asset Type
+          description: CAI asset type of that resource
+        role:
+          type: string
+          title: Role
+          description: Role granted
+        member:
+          type: string
+          title: Member
+          description: Principal, e.g. user:a@example.com or group:ops@example.com
+        member_type:
+          type: string
+          title: Member Type
+          description: user, group, serviceAccount, domain, allUsers, ...
+        risk:
+          type: string
+          title: Risk
+          description: Highest risk among the matched permissions
+        matched_permissions:
+          items:
+            type: string
+          type: array
+          title: Matched Permissions
+          description: Risky permissions in this role that the search matched
+        condition:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Condition
+          description: IAM condition expression, when the binding is conditional
+      type: object
+      required:
+      - resource
+      - role
+      - member
+      - member_type
+      - risk
+      - matched_permissions
+      title: Grant
+      description: One principal holding one risky role on one resource.
+    GrantGroup:
+      properties:
+        key:
+          type: string
+          title: Key
+          description: The member or role grouped on
+        highest_risk:
+          type: string
+          title: Highest Risk
+        grant_count:
+          type: integer
+          title: Grant Count
+        resource_count:
+          type: integer
+          title: Resource Count
+          description: Distinct resources involved
+        roles:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Roles
+          description: Roles held (grouping by member)
+        members:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Members
+          description: Holders (grouping by role)
+      type: object
+      required:
+      - key
+      - highest_risk
+      - grant_count
+      - resource_count
+      title: GrantGroup
+      description: Grants rolled up by member or by role, for an over-permissioning
+        review.
+    GrantList:
+      properties:
+        scope:
+          type: string
+          title: Scope
+        min_risk:
+          type: string
+          title: Min Risk
+          description: Lowest role risk included
+        member_types:
+          items:
+            type: string
+          type: array
+          title: Member Types
+          description: Member types searched; empty means all
+        queries:
+          items:
+            type: string
+          type: array
+          title: Queries
+          description: The CAI queries sent, one per batch of permissions. CAI caps
+            the alternations in a single query, so a long permission list is searched
+            in batches.
+        count:
+          type: integer
+          title: Count
+        truncated:
+          type: boolean
+          title: Truncated
+        suppressed:
+          type: integer
+          title: Suppressed
+          description: Service-agent grants hidden by default; show_all=true includes
+            them
+          default: 0
+        suppressed_summary:
+          type: string
+          title: Suppressed Summary
+          default: ''
+        coverage_note:
+          type: string
+          title: Coverage Note
+          description: What this search cannot see. Read it before treating the list
+            as complete.
+        grants:
+          items:
+            $ref: '#/components/schemas/Grant'
+          type: array
+          title: Grants
+        groups:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/GrantGroup'
+            type: array
+          - type: 'null'
+          title: Groups
+          description: Present when group_by was requested
+      type: object
+      required:
+      - scope
+      - min_risk
+      - member_types
+      - queries
+      - count
+      - truncated
+      - coverage_note
+      - grants
+      title: GrantList
+      description: Envelope returned by a high-risk grant search.
     HTTPValidationError:
       properties:
         detail:
@@ -656,6 +1010,128 @@ components:
       - data
       title: ResourceList
       description: Envelope returned by a resource search.
+    RiskSource:
+      properties:
+        title:
+          type: string
+          title: Title
+        url:
+          type: string
+          title: Url
+        quote:
+          type: string
+          title: Quote
+          description: The passage the rule relies on
+      type: object
+      required:
+      - title
+      - url
+      - quote
+      title: RiskSource
+      description: A published source a risk rule relies on, quoted so it can be checked.
+    RiskyPermission:
+      properties:
+        permission:
+          type: string
+          title: Permission
+          description: IAM permission, e.g. iam.serviceAccounts.actAs
+        risk:
+          type: string
+          title: Risk
+          description: high or medium
+        reason:
+          type: string
+          title: Reason
+          description: What a holder of this permission can do
+        sources:
+          items:
+            type: string
+          type: array
+          title: Sources
+          description: Ids of the sources supporting this rule
+      type: object
+      required:
+      - permission
+      - risk
+      - reason
+      - sources
+      title: RiskyPermission
+      description: One permission that makes a role risky, and why.
+    RiskyRole:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Role name, e.g. roles/owner
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+          description: Human-readable title
+        stage:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Stage
+          description: Launch stage, e.g. GA or DEPRECATED
+        risk:
+          type: string
+          title: Risk
+          description: Highest risk of any permission the role contains
+        permissions:
+          items:
+            $ref: '#/components/schemas/RiskyPermission'
+          type: array
+          title: Permissions
+          description: The risky permissions it contains
+      type: object
+      required:
+      - name
+      - risk
+      - permissions
+      title: RiskyRole
+      description: An IAM role classified by the permissions it contains.
+    RoleList:
+      properties:
+        min_risk:
+          type: string
+          title: Min Risk
+          description: Lowest risk level included
+        count:
+          type: integer
+          title: Count
+          description: Number of roles in `data`
+        suppressed:
+          type: integer
+          title: Suppressed
+          description: Service-agent roles hidden by default; show_all=true includes
+            them
+          default: 0
+        suppressed_summary:
+          type: string
+          title: Suppressed Summary
+          description: What was hidden, and why
+          default: ''
+        data:
+          items:
+            $ref: '#/components/schemas/RiskyRole'
+          type: array
+          title: Data
+        sources:
+          additionalProperties:
+            $ref: '#/components/schemas/RiskSource'
+          type: object
+          title: Sources
+          description: Every source cited by the returned roles, keyed by id
+      type: object
+      required:
+      - min_risk
+      - count
+      - data
+      - sources
+      title: RoleList
+      description: Roles at or above a risk level.
     Summary:
       properties:
         scope:

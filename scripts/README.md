@@ -9,6 +9,8 @@ except `setup-gcp.sh`.
 | `compare-resources.sh` | Diff the tool's results against `gcloud` for the same filters; exits non-zero if they differ |
 | `gcloud-search-resources.sh` | Independent `gcloud` implementation of `search`, emitting normalised JSON lines |
 | `explorer-search-resources.sh` | The tool's own results in the same normalised form (implemented in `_explorer_search.py`) |
+| `compare-grants.sh` | Diff `gcpe grants --show-all` against gcloud. The gcloud side runs one search per permission, independent of the tool's batching. |
+| `gcloud-search-grants.sh` / `_explorer_grants.py` | The two sides of `compare-grants.sh`, as sorted `resource<TAB>role<TAB>member` lines |
 | `check-noise.sh` | Checks that the noise-suppressed result is a strict subset of the full result |
 | `benchmark.py` | Records a latency baseline for the delivery plan |
 
@@ -36,6 +38,10 @@ All of these need ADC and Cloud Asset Viewer on the scope.
 # Run either side on its own
 ./scripts/gcloud-search-resources.sh --scope projects/my-project --type bucket
 ./scripts/explorer-search-resources.sh --scope projects/my-project --type bucket
+
+# Risky grants: tool vs gcloud
+./scripts/compare-grants.sh --scope projects/my-project
+./scripts/compare-grants.sh --scope organizations/123 --role-risk medium --member-type user --member-type group
 
 # Noise reduction may only remove rows, never add or alter them
 ./scripts/check-noise.sh projects/my-project

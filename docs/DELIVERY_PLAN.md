@@ -510,6 +510,63 @@ entirely.
 
 ---
 
+## Phase 8 — High-risk roles and grants ◐
+
+**Goal:** see which IAM roles are high risk, and who holds them, across a project or an
+organization — to review over-permissioning. Organization Administrator and Billing Account
+Administrator were the motivating examples.
+
+- ☑ `GET /v1/roles?risk=high` / `gcpe roles --risk high` — roles classed as risky, each with
+  the permissions that make it so.
+- ☑ `GET /v1/grants?role_risk=high&member_type=user&member_type=group&group_by=member` /
+  `gcpe grants SCOPE …` — who holds those roles, flat or rolled up by member or role.
+- ☑ Rules in `app/role_risk_rules.json`, each citing quoted sources; evidence in
+  [ROLE_RISK.md](ROLE_RISK.md). Site-overridable via `role_risk_rules`.
+- ☑ `--show-gcloud`, an independent `scripts/gcloud-search-grants.sh`, and
+  `scripts/compare-grants.sh` — matching on all three real-estate checks run.
+- ☐ **Billing account IAM** via the Cloud Billing API (`billingAccounts.list` +
+  `getIamPolicy`): a small, bounded set of calls. Needs `roles/billing.viewer` and the API on
+  the quota project.
+- ☐ **Group expansion** via the Cloud Identity Groups API.
+- ☐ **Custom roles in `/v1/roles`.** `/v1/grants` already matches them (the permission query
+  covers them); listing them needs a per-org call, or verifying whether CAI's
+  `iam.googleapis.com/Role` assets carry their permissions.
+
+### Risk is a property of permissions, not role names
+
+A role's risk is the highest risk of any permission it holds. One rule set drives both
+endpoints — `/v1/roles` evaluates it against the IAM role catalogue, `/v1/grants` compiles it
+into `policy.role.permissions:(…)` for CAI — so they cannot disagree, and custom or unlisted
+roles are classified without anyone naming them. On the live catalogue the high rules select
+35 predefined roles (plus 60 service-agent roles), including `owner`, `editor`,
+`billing.admin`, `organizationAdmin` and `iam.securityAdmin`, and not `viewer`.
+
+### Verified facts that shaped this phase
+
+- **CAI caps a query at 32 alternations, counted as a product.** 32 permissions pass, 33 fail;
+  16 permissions × 2 member types pass, 17 × 2 fail; 10 × 3 pass, 11 × 3 fail
+  (`Query has too many alternations`). Permissions are therefore searched in batches sized to
+  the member-type count, and results merged per (resource, role, member, condition).
+- **`explanation.matched_permissions`** reports, per role, which queried permissions it holds —
+  so each grant says *why* it is risky. CAI returns whole policies; bindings are narrowed to the
+  matched roles and members to the requested types, a narrowing of rows already fetched.
+- **IAM policy search has no negation**, so service agents cannot be excluded in the query and
+  are hidden client-side, counted, and shown with `show_all` — the noise-reduction invariants.
+- **Billing accounts are not a CAI scope** (`Invalid scope [billingAccounts/…]`), hence the
+  separate item above.
+- **The role catalogue** is ~2,400 roles, ~10 MB, 3 pages from `iam.googleapis.com/v1/roles`.
+  It is cached in-process for 24 hours — the one cache on by default, because it is Google's
+  reference data about roles rather than the customer's estate.
+
+### Real findings on the dev estate
+
+In `gcp-sandbox-2026-18798`, the Compute Engine and App Engine **default service accounts hold
+Editor** — exactly what Google's service-account guidance and CIS 1.5 warn against. Also found:
+a user holding Owner, deploy service accounts holding Service Account User at project level
+(CIS 1.6), and GitHub workload-identity principals able to impersonate deploy accounts.
+
+---
+
 ## Sequencing rationale
 
 Phase 1 comes first because every later phase adds fields, filters, or response shapes, and
@@ -519,4 +576,6 @@ than targeted search. Phase 4 is intentionally after the query shape stabilises,
 synchronous: FastAPI already runs plain `def` endpoints in a threadpool, so the concurrency is
 there without making the core a coroutine. Phases 5 and 6 are adoption work, needed only once
 other people or systems consume the tool. Phase 7 is deliberately unscheduled — async is a
-response to a measured ceiling, not a starting position.
+response to a measured ceiling, not a starting position. Phase 8 extends the tool from *what
+exists* to *who can change it*, reusing the server-side query, invariant and differential-check
+patterns of the earlier phases.

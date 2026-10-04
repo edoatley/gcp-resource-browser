@@ -19,6 +19,8 @@ $ gcpe [OPTIONS] COMMAND [ARGS]...
 * `search`: Search resources across a scope, with...
 * `list-resources`: Query one resource type and print a table...
 * `summary`: Count resources in a scope by type,...
+* `roles`: List IAM roles classed as risky, and the...
+* `grants`: Find principals holding risky roles across...
 * `openapi`: Export the API&#x27;s OpenAPI specification.
 * `types`: List the friendly resource-type names this...
 * `serve`: Run the FastAPI server.
@@ -104,6 +106,54 @@ $ gcpe summary [OPTIONS] {scope} [term]
 * `--project <str>`: Project filter, repeatable; several are ORed. Accepts a project ID or number (IDs are resolved to numbers, which is what CAI matches on).
 * `--show-all`: Include resources hidden by default (enabled API services, image layers, auto-created default routes and subnets, and similar)
 * `-o, --output <table|json|csv>`: Output format  [default: table]
+* `--help`: Show this message and exit.
+
+## `gcpe roles`
+
+List IAM roles classed as risky, and the permissions that make them so.
+
+A role&#x27;s risk is the highest risk of any permission it contains. The rules
+and the sources behind them are in docs/ROLE_RISK.md.
+
+**Usage**:
+
+```console
+$ gcpe roles [OPTIONS]
+```
+
+**Options**:
+
+* `-r, --risk <str>`: Lowest role risk to include: `high`, or `medium` for medium and high  [default: high]
+* `--show-all`: Include Google-managed service agents, hidden by default
+* `-o, --output <table|json|csv>`: Output format  [default: table]
+* `--help`: Show this message and exit.
+
+## `gcpe grants`
+
+Find principals holding risky roles across a scope.
+
+Matching is by permission, so custom roles are covered. Search the
+organization to include grants made at every level.
+
+**Usage**:
+
+```console
+$ gcpe grants [OPTIONS] {scope}
+```
+
+**Arguments**:
+
+* `scope`: CAI scope: organizations/&lt;id&gt;, folders/&lt;id&gt;, or projects/&lt;id&gt;  [required]
+
+**Options**:
+
+* `-r, --role-risk <str>`: Lowest role risk to include: `high`, or `medium` for medium and high  [default: high]
+* `-m, --member-type <str>`: Principal type to include, repeatable: user, group, serviceAccount, domain, allUsers, allAuthenticatedUsers, principal, principalSet. Omit for all.
+* `--by <str>`: Roll grants up by `member` (who holds what) or `role` (who holds each role)
+* `--show-all`: Include Google-managed service agents, hidden by default
+* `-n, --limit <int range>`: Maximum resources to return  [default: 1000; x&gt;=1]
+* `-o, --output <table|json|csv>`: Output format  [default: table]
+* `--show-gcloud`: Print the equivalent `gcloud asset search-all-iam-policies` command(s)
 * `--help`: Show this message and exit.
 
 ## `gcpe openapi`

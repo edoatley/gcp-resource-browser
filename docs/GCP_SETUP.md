@@ -11,6 +11,7 @@ account on Cloud Run or GKE.
 |:---|:---|
 | Cloud Asset API (`cloudasset.googleapis.com`) enabled | The **quota project** that ADC bills calls to |
 | `roles/cloudasset.viewer` | Each **scope** you search (project, folder or organisation) |
+| IAM API (`iam.googleapis.com`) enabled | The **quota project**. Needed only for `gcpe roles` / `GET /v1/roles`. |
 
 Google returns HTTP 403 for both failures, but the fixes are different and usually apply to
 different projects. The tool tells them apart:
@@ -28,6 +29,7 @@ to run. Trust that over the scope you searched.
 `scripts/setup-gcp.sh` provisions:
 
 - a dedicated project (`gcp-resource-browser-eo`) to act as the API and quota home
+- the Cloud Asset, IAM Credentials and IAM APIs on that project
 - a read-only service account (`resource-browser@…`)
 - `cloudasset.viewer` grants on each project listed in `TARGET_PROJECTS` in the script
 

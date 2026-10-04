@@ -1,4 +1,4 @@
-"""Cloud Asset Inventory access.
+"""Cloud Asset Inventory access, plus the IAM role catalogue.
 
 The only module that talks to GCP. The CLI and the API are both thin wrappers
 over `search_resources`, so any new capability belongs here rather than in
@@ -22,13 +22,14 @@ from google.api_core import exceptions as gcp_exceptions
 from google.cloud import asset_v1
 from google.rpc.error_details_pb2 import ErrorInfo
 
-from app.aggregate import ATTACHED_IAM_NOTE, attach_iam, fetch_iam_bindings
+from app import role_risk
+from app.aggregate import ATTACHED_IAM_NOTE, attach_iam, fetch_iam_bindings, group_grants
 from app.cache import TTLCache
 from app.config import load_config
-from app.models import Resource
+from app.models import Grant, GrantList, Resource, RiskSource, RiskyPermission, RiskyRole, RoleList
 from app.noise import NoiseFilter
-from app.params import DEFAULT_PAGE_SIZE, SORTABLE_FIELDS, SearchFilters
-from app.query import QueryError, build_query
+from app.params import DEFAULT_PAGE_SIZE, SORTABLE_FIELDS, GrantFilters, SearchFilters
+from app.query import QueryError, build_query, grant_query
 
 # Friendly names mapped to CAI asset types, loaded from data rather than
 # written as a literal so scripts/ can read the same file with jq. The mapping
@@ -176,6 +177,11 @@ def _service_disabled_error(exc: gcp_exceptions.PermissionDenied) -> ApiNotEnabl
     # which is frequently NOT the project being searched. Naming the wrong one
     # is the whole reason this case is separated out.
     consumer = metadata.get("containerInfo") or metadata.get("consumer", "your quota project")
+    return _api_not_enabled(service, consumer)
+
+
+def _api_not_enabled(service: str, consumer: str) -> ApiNotEnabledError:
+    consumer = consumer.removeprefix("projects/")
     return ApiNotEnabledError(
         f"{service} is not enabled on {consumer}, the project this request bills to "
         f"(which may differ from the scope being searched). Enable it with:\n"
@@ -598,3 +604,247 @@ def search_resources(
     if filters.cache_ttl > 0:
         _RESPONSE_CACHE.put(_cache_key(filters), result)
     return result
+
+
+# --- Role risk -------------------------------------------------------------
+
+IAM_ROLES_URL = "https://iam.googleapis.com/v1/roles"
+
+# The predefined role catalogue: ~2,400 roles, ~10 MB, 3 pages. Cached for a
+# day. This is the ONE cache that is on by default, and deliberately so: it is
+# Google's reference data about what roles contain, not the customer's estate,
+# so a day-old copy cannot hide a fix someone is verifying. Search results stay
+# uncached by default (see app/cache.py).
+ROLE_CATALOGUE_TTL = 24 * 60 * 60
+_ROLE_CATALOGUE = TTLCache(ttl_seconds=ROLE_CATALOGUE_TTL)
+
+
+@lru_cache(maxsize=1)
+def get_iam_session():
+    """An authorised HTTP session for the IAM REST API, on the same ADC as CAI."""
+    from google.auth.transport.requests import AuthorizedSession
+
+    credentials, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+    return AuthorizedSession(credentials)
+
+
+def _iam_error(response) -> ResourceExplorerError:
+    try:
+        error = response.json().get("error", {})
+    except ValueError:
+        error = {}
+    message = error.get("message") or f"HTTP {response.status_code}"
+    for detail in error.get("details", []):
+        if detail.get("reason") == "SERVICE_DISABLED":
+            metadata = detail.get("metadata", {})
+            return _api_not_enabled(
+                metadata.get("service", "iam.googleapis.com"),
+                metadata.get("consumer", "your quota project"),
+            )
+    return UpstreamError(f"IAM role listing failed: {message}")
+
+
+def fetch_role_catalogue(session=None) -> list[dict]:
+    """Every predefined role with its permissions, from the IAM API (cached)."""
+    if (cached := _ROLE_CATALOGUE.get("predefined")) is not None:
+        return cached
+
+    session = session or get_iam_session()
+    roles: list[dict] = []
+    page_token = None
+    while True:
+        params = {"view": "FULL", "pageSize": 1000}
+        if page_token:
+            params["pageToken"] = page_token
+        response = session.get(IAM_ROLES_URL, params=params)
+        if not response.ok:
+            raise _iam_error(response)
+        body = response.json()
+        roles.extend(body.get("roles", []))
+        page_token = body.get("nextPageToken")
+        if not page_token:
+            break
+
+    _ROLE_CATALOGUE.put("predefined", roles)
+    return roles
+
+
+def _parse_min_risk(value: str) -> role_risk.Risk:
+    try:
+        return role_risk.parse_risk(value)
+    except role_risk.RiskRuleError as exc:
+        raise InvalidFilterError(str(exc)) from exc
+
+
+def _risky_permission(rule: role_risk.RiskRule) -> RiskyPermission:
+    return RiskyPermission(
+        permission=rule.permission,
+        risk=rule.risk.value,
+        reason=rule.reason,
+        sources=list(rule.sources),
+    )
+
+
+def list_risky_roles(min_risk: str = "high", show_all: bool = False, session=None) -> RoleList:
+    """Predefined roles containing at least one permission at or above `min_risk`.
+
+    Service-agent roles are hidden unless `show_all`, and always counted: they
+    are granted by Google, not by the customer, and are most of the matches.
+    """
+    minimum = _parse_min_risk(min_risk)
+    roles: list[RiskyRole] = []
+    hidden = 0
+    for raw in fetch_role_catalogue(session):
+        matched = role_risk.classify(raw.get("includedPermissions", []), minimum)
+        if not matched:
+            continue
+        if not show_all and role_risk.is_service_agent_role(raw["name"]):
+            hidden += 1
+            continue
+        roles.append(
+            RiskyRole(
+                name=raw["name"],
+                title=raw.get("title"),
+                stage=raw.get("stage"),
+                risk=role_risk.highest(matched).value,
+                permissions=[_risky_permission(r) for r in matched],
+            )
+        )
+
+    roles.sort(key=lambda r: (-role_risk.Risk(r.risk).rank, r.name))
+    cited = {source for role in roles for perm in role.permissions for source in perm.sources}
+    sources = role_risk.load_sources()
+    return RoleList(
+        min_risk=minimum.value,
+        count=len(roles),
+        suppressed=hidden,
+        suppressed_summary=(
+            f"{hidden} Google service-agent role(s) hidden. Use --show-all to include them."
+            if hidden
+            else ""
+        ),
+        data=roles,
+        sources={
+            key: RiskSource(title=src.title, url=src.url, quote=src.quote)
+            for key, src in sorted(sources.items())
+            if key in cited
+        },
+    )
+
+
+def _coverage_note(scope: str) -> str:
+    """What a grant search at this scope cannot see. Stated on every response."""
+    kind = scope.split("/", 1)[0]
+    above = {
+        "projects": (
+            "Grants made on this project's folders or organization are not visible from a "
+            "project scope, though they apply here; search the organization to include them."
+        ),
+        "folders": (
+            "Grants made on parent folders or the organization are not visible from a folder "
+            "scope, though they apply here; search the organization to include them."
+        ),
+        "organizations": "Covers the organization and everything beneath it.",
+    }[kind]
+    return (
+        f"{above} Billing account IAM is not indexed by Cloud Asset Inventory and is not "
+        "included. Group membership is not expanded: a group grant applies to every member."
+    )
+
+
+def search_grants(
+    filters: GrantFilters, client: asset_v1.AssetServiceClient | None = None
+) -> GrantList:
+    """Principals holding roles at or above `filters.min_risk`, across a scope.
+
+    Matching is done by CAI (`policy.role.permissions:`), which covers custom
+    roles too. CAI returns whole policies, so bindings are narrowed to the
+    roles CAI reports as matched, and members to the requested types -- a
+    narrowing of rows already fetched, never a broader fetch. Service agents
+    are hidden client-side because IAM policy search has no negation.
+    """
+    validate_scope(filters.scope)
+    minimum = _parse_min_risk(filters.min_risk)
+    try:
+        member_types = role_risk.validate_member_types(filters.member_types)
+    except role_risk.RiskRuleError as exc:
+        raise InvalidFilterError(str(exc)) from exc
+    if filters.group_by not in (None, "member", "role"):
+        raise InvalidFilterError(
+            f"Cannot group by {filters.group_by!r}. Choose from: member, role."
+        )
+
+    rules = {r.permission: r for r in role_risk.rules_at_least(minimum)}
+    batches = role_risk.permission_batches(list(rules), len(member_types))
+    queries = [grant_query(batch, member_types) for batch in batches]
+    client = client or get_client()
+
+    # (resource, role, member, condition) -> grant; batches overlap on roles
+    # that hold permissions from several batches, so merge rather than repeat.
+    found: dict[tuple[str, str, str, str], Grant] = {}
+    hidden: set[tuple[str, str, str, str]] = set()
+    for query in queries:
+        request = asset_v1.SearchAllIamPoliciesRequest(scope=filters.scope, query=query)
+        try:
+            for result in client.search_all_iam_policies(request=request):
+                matched = {
+                    role: list(perms.permissions)
+                    for role, perms in result.explanation.matched_permissions.items()
+                }
+                for binding in result.policy.bindings:
+                    if binding.role not in matched:
+                        continue
+                    condition = binding.condition.expression or None
+                    for member in binding.members:
+                        kind = role_risk.member_type(member)
+                        if member_types and kind not in member_types:
+                            continue
+                        key = (result.resource, binding.role, member, condition or "")
+                        if not filters.show_all and role_risk.is_service_agent_grant(
+                            member, binding.role
+                        ):
+                            hidden.add(key)
+                            continue
+                        perms = set(matched[binding.role])
+                        if key in found:
+                            perms |= set(found[key].matched_permissions)
+                        hit = [rules[p] for p in perms if p in rules]
+                        found[key] = Grant(
+                            resource=result.resource,
+                            asset_type=result.asset_type or None,
+                            role=binding.role,
+                            member=member,
+                            member_type=kind,
+                            risk=role_risk.highest(hit).value,
+                            matched_permissions=sorted(perms),
+                            condition=condition,
+                        )
+        except gcp_exceptions.GoogleAPICallError as exc:
+            raise _translate(exc, filters.scope) from exc
+
+    grants = sorted(
+        found.values(),
+        key=lambda g: (-role_risk.Risk(g.risk).rank, g.member, g.role, g.resource),
+    )
+    truncated = filters.limit is not None and len(grants) > filters.limit
+    if truncated:
+        grants = grants[: filters.limit]
+
+    return GrantList(
+        scope=filters.scope,
+        min_risk=minimum.value,
+        member_types=member_types,
+        queries=queries,
+        count=len(grants),
+        truncated=truncated,
+        suppressed=len(hidden),
+        suppressed_summary=(
+            f"{len(hidden)} grant(s) to Google service agents hidden. "
+            "Use --show-all to include them."
+            if hidden
+            else ""
+        ),
+        coverage_note=_coverage_note(filters.scope),
+        grants=grants,
+        groups=group_grants(grants, filters.group_by) if filters.group_by else None,
+    )

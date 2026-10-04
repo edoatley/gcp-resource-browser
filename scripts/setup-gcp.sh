@@ -40,8 +40,10 @@ fi
 
 say "APIs"
 # cloudasset: what the tool calls. iamcredentials: needed to impersonate the SA.
+# iam: the predefined role catalogue behind `gcpe roles` / GET /v1/roles. Listing
+# predefined roles needs no extra IAM role, only the API on the quota project.
 gcloud services enable cloudasset.googleapis.com iamcredentials.googleapis.com \
-  --project="$PROJECT_ID"
+  iam.googleapis.com --project="$PROJECT_ID"
 
 say "Service account $SA_EMAIL"
 if gcloud iam service-accounts describe "$SA_EMAIL" --project="$PROJECT_ID" >/dev/null 2>&1; then

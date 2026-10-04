@@ -41,6 +41,7 @@ class Config:
     extra_asset_types: dict[str, str] = field(default_factory=dict)
     extra_noise_rules: list[dict] = field(default_factory=list)
     unsuppressed_types: frozenset[str] = frozenset()
+    extra_role_risk_rules: list[dict] = field(default_factory=list)
 
 
 def config_paths() -> list[Path]:
@@ -57,13 +58,13 @@ def _validate(raw: dict, source: Path) -> Config:
     if not isinstance(raw, dict):
         raise ConfigError(f"{source}: expected a JSON object at the top level.")
 
-    unknown = set(raw) - {"asset_types", "noise_rules", "unsuppress", "_comment"}
+    unknown = set(raw) - {"asset_types", "noise_rules", "unsuppress", "role_risk_rules", "_comment"}
     if unknown:
         # Silently ignoring a typo'd key would leave someone convinced their
         # config was applied when it was not.
         raise ConfigError(
             f"{source}: unknown key(s) {', '.join(sorted(unknown))}. "
-            "Expected: asset_types, noise_rules, unsuppress."
+            "Expected: asset_types, noise_rules, unsuppress, role_risk_rules."
         )
 
     asset_types = raw.get("asset_types", {})
@@ -86,11 +87,26 @@ def _validate(raw: dict, source: Path) -> Config:
     if not isinstance(unsuppress, list) or not all(isinstance(t, str) for t in unsuppress):
         raise ConfigError(f"{source}: 'unsuppress' must be a list of CAI asset types.")
 
+    role_risk_rules = raw.get("role_risk_rules", [])
+    if not isinstance(role_risk_rules, list):
+        raise ConfigError(f"{source}: 'role_risk_rules' must be a list.")
+    for rule in role_risk_rules:
+        if (
+            not isinstance(rule, dict)
+            or not {"permission", "risk", "reason"} <= set(rule)
+            or rule["risk"] not in ("high", "medium")
+        ):
+            raise ConfigError(
+                f"{source}: each role risk rule needs 'permission', 'reason' and a 'risk' of "
+                "'high' or 'medium' (and may add 'sources')."
+            )
+
     return Config(
         source=source,
         extra_asset_types=dict(asset_types),
         extra_noise_rules=list(noise_rules),
         unsuppressed_types=frozenset(unsuppress),
+        extra_role_risk_rules=list(role_risk_rules),
     )
 
 

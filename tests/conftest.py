@@ -79,9 +79,11 @@ class FakeAssetClient:
         self.last_request: asset_v1.SearchAllResourcesRequest | None = None
         self.requests: list[asset_v1.SearchAllResourcesRequest] = []
         self.iam_request: asset_v1.SearchAllIamPoliciesRequest | None = None
+        self.iam_requests: list[asset_v1.SearchAllIamPoliciesRequest] = []
 
     def search_all_iam_policies(self, request: asset_v1.SearchAllIamPoliciesRequest):
         self.iam_request = request
+        self.iam_requests.append(request)
         if self.raises is not None:
             raise self.raises
         return iter(self.iam_policies)
@@ -108,12 +110,29 @@ def make_iam_result(
     resource: str = "//storage.googleapis.com/buckets/example",
     role: str = "roles/storage.admin",
     members: tuple[str, ...] = ("user:someone@example.com",),
+    matched: dict[str, list[str]] | None = None,
+    extra_bindings: dict[str, tuple[str, ...]] | None = None,
+    condition: str = "",
 ) -> asset_v1.IamPolicySearchResult:
-    """A CAI IAM policy result; `resource` is the join key."""
+    """A CAI IAM policy result; `resource` is the join key.
+
+    `matched` mimics `explanation.matched_permissions`, which CAI fills only
+    for permission queries: role -> the queried permissions that role holds.
+    """
     result = asset_v1.IamPolicySearchResult(resource=resource)
     binding = result.policy.bindings.add()
     binding.role = role
     binding.members.extend(members)
+    if condition:
+        binding.condition.expression = condition
+    for extra_role, extra_members in (extra_bindings or {}).items():
+        extra = result.policy.bindings.add()
+        extra.role = extra_role
+        extra.members.extend(extra_members)
+    for matched_role, permissions in (matched or {}).items():
+        result.explanation.matched_permissions[matched_role] = (
+            asset_v1.IamPolicySearchResult.Explanation.Permissions(permissions=permissions)
+        )
     return result
 
 

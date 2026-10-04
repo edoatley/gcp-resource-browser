@@ -37,6 +37,10 @@ both.
 3. Checks that `openapi.yml` and `docs/CLI_REFERENCE.md` are up to date
 4. Builds the image, runs `--help` in it, and checks that no credential-shaped file is in it
 
+`.github/workflows/pages.yml` publishes `openapi.yml` with Swagger UI (`docs/api/index.html`)
+to GitHub Pages whenever either changes on `main`. It needs Pages enabled with **Source: GitHub
+Actions** (Settings → Pages).
+
 ## Checking against `gcloud`
 
 A fake client answers any query it is given, so unit tests cannot catch a *wrong* query: one

@@ -8,8 +8,17 @@ uv run gcp-explorer serve                       # http://127.0.0.1:8000
 uv run gcp-explorer serve --host 0.0.0.0 --port 9000
 ```
 
-Interactive docs are at **`/docs`** (Swagger UI), and the live schema is at **`/openapi.json`**.
-[`openapi.yml`](../openapi.yml) in the repo root is the committed copy for code generation.
+## OpenAPI spec
+
+| Where | What |
+|:---|:---|
+| **[edoatley.github.io/gcp-resource-browser](https://edoatley.github.io/gcp-resource-browser/)** | Browsable reference, no server needed. Published from `main` by `.github/workflows/pages.yml`. Read-only. |
+| `http://127.0.0.1:8000/docs` | Swagger UI on a running server, with **Try it out** against your real estate |
+| `http://127.0.0.1:8000/redoc` | The same spec rendered with ReDoc |
+| `http://127.0.0.1:8000/openapi.json` | The live schema |
+| [`openapi.yml`](../openapi.yml) | The committed spec, for code generation. CI fails if it differs from the code. |
+
+Regenerate it after changing the API with `uv run gcp-explorer openapi --out openapi.yml`.
 
 ## Endpoints
 

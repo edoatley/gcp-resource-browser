@@ -152,8 +152,12 @@ def stream_resources(
         sort=sort,
     )
 
+    # Called before the response exists, so validation errors reach the
+    # exception handler as a typed 4xx rather than an empty 200 stream.
+    rows = core.stream_resources(filters)
+
     def lines():
-        for resource in core.stream_resources(filters):
+        for resource in rows:
             yield resource.model_dump_json(exclude_none=True) + "\n"
 
     return StreamingResponse(lines(), media_type="application/x-ndjson")

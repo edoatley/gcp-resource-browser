@@ -12,7 +12,7 @@ import io
 import json
 from enum import StrEnum
 
-from app.models import Resource
+from app.models import Resource, Summary
 
 
 class OutputFormat(StrEnum):
@@ -49,4 +49,26 @@ def to_csv(resources: list[Resource]) -> str:
         row = resource.model_dump(mode="json")
         row["labels"] = json.dumps(row.get("labels") or {}, separators=(",", ":"))
         writer.writerow({column: row.get(column) for column in CSV_COLUMNS})
+    return buffer.getvalue()
+
+
+def summary_to_csv(summary: Summary) -> str:
+    """One row per (dimension, key) count -- the long form, which pivots cleanly.
+
+    Suppressed resources get their own row rather than being left out, for the
+    same reason the table reports them: a total that hides what it excluded
+    misstates the scope.
+    """
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(("dimension", "key", "count"))
+    writer.writerow(("total", summary.scope, summary.total))
+    writer.writerow(("suppressed", summary.scope, summary.suppressed))
+    for dimension, counts in (
+        ("asset_type", summary.by_asset_type),
+        ("project", summary.by_project),
+        ("location", summary.by_location),
+    ):
+        for key, count in counts.items():
+            writer.writerow((dimension, key, count))
     return buffer.getvalue()

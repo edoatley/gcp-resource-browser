@@ -445,9 +445,14 @@ def stream_resources(
     Note what is NOT yielded: noise-suppressed resources, and anything past
     `limit`. Callers needing the suppression counts use `search_resources`,
     which can report them once the stream is exhausted.
+
+    Deliberately not itself a generator: validation and query compilation run
+    here, at call time, so a bad scope or type raises before a caller has
+    committed to a streamed 200. As a generator, they ran on first iteration --
+    after the response had started -- and a malformed request came back as an
+    empty 200, indistinguishable from "nothing matched".
     """
-    prepared = _prepare(filters, client)
-    yield from prepared.iterate()
+    return _prepare(filters, client).iterate()
 
 
 @dataclass

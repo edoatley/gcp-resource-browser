@@ -381,3 +381,99 @@ def test_bad_sort_exits_with_usage_code(use_fake) -> None:
     )
 
     assert result.exit_code == cli_module.EXIT_USAGE
+
+
+def test_search_honours_cache_ttl_on_a_single_scope(use_fake) -> None:
+    """--cache-ttl was once dropped on the single-scope path, so it did nothing."""
+    core._RESPONSE_CACHE.clear()
+    fake = use_fake(FakeAssetClient(results=[make_search_result()]))
+    args = ["search", "projects/p", "--type", "bucket", "--cache-ttl", "60"]
+
+    runner.invoke(cli_module.cli, args)
+    runner.invoke(cli_module.cli, args)
+
+    assert len(fake.requests) == 1
+    core._RESPONSE_CACHE.clear()
+
+
+def _default_subnet():
+    return make_search_result(
+        name="//compute.googleapis.com/projects/p/regions/r/subnetworks/default",
+        asset_type="compute.googleapis.com/Subnetwork",
+        display_name="default",
+    )
+
+
+def _custom_subnet():
+    return make_search_result(
+        name="//compute.googleapis.com/projects/p/regions/r/subnetworks/mine",
+        asset_type="compute.googleapis.com/Subnetwork",
+        display_name="mine",
+    )
+
+
+def test_list_resources_reports_what_noise_rules_hid(use_fake) -> None:
+    """Rules apply to a named type too; hiding rows without saying so is the failure."""
+    use_fake(FakeAssetClient(results=[_default_subnet(), _custom_subnet()]))
+
+    result = runner.invoke(cli_module.cli, ["list-resources", "projects/p", "subnet"])
+
+    assert result.exit_code == 0
+    assert "mine" in result.output
+    assert "1 hidden" in result.output
+
+
+def test_list_resources_show_all_disables_noise_rules(use_fake) -> None:
+    use_fake(FakeAssetClient(results=[_default_subnet(), _custom_subnet()]))
+
+    result = runner.invoke(cli_module.cli, ["list-resources", "projects/p", "subnet", "--show-all"])
+
+    assert "default" in result.output
+    assert "hidden" not in result.output
+
+
+def test_summary_csv_output_is_csv(use_fake) -> None:
+    import csv
+    import io
+
+    use_fake(FakeAssetClient(results=[make_search_result(name=f"//x/{i}") for i in range(3)]))
+
+    result = runner.invoke(cli_module.cli, ["summary", "projects/p", "-o", "csv"])
+
+    rows = list(csv.DictReader(io.StringIO(result.stdout)))
+    assert {"dimension": "total", "key": "projects/p", "count": "3"} in rows
+
+
+def test_summary_passes_term_and_project_through(use_fake) -> None:
+    fake = use_fake(FakeAssetClient(results=[]))
+
+    runner.invoke(cli_module.cli, ["summary", "projects/p", "backup", "--project", "123456"])
+
+    assert "backup" in fake.last_request.query
+    assert "project:123456" in fake.last_request.query
+
+
+def test_fanout_machine_output_keeps_notes_on_stderr(use_fake) -> None:
+    """--also-scope must not lose the notes a single-scope search gives."""
+    use_fake(FakeAssetClient(results=[make_search_result(name=f"//x/{i}") for i in range(5)]))
+
+    result = runner.invoke(
+        cli_module.cli,
+        [
+            "search",
+            "projects/a",
+            "--also-scope",
+            "projects/b",
+            "--type",
+            "bucket",
+            "-n",
+            "2",
+            "-o",
+            "json",
+        ],
+    )
+
+    import json
+
+    assert len(json.loads(result.stdout)) == 4
+    assert "more exist" in result.stderr

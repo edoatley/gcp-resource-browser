@@ -1,6 +1,6 @@
 """Entry point.
 
-Kept so `python -m app.main` and the `gcp-explorer` console script both work.
+Kept so `python -m app.main` and the `gcpe` / `gcp-explorer` console scripts all work.
 The implementation lives in `app.cli`, `app.api`, and `app.core`.
 """
 

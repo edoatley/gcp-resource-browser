@@ -7,8 +7,9 @@ cache is the wrong default when someone is checking whether a fix landed. The
 protection it offers is against repeated identical polling, which is a
 deployment decision, so it is opt-in.
 
-Enable with `--cache-ttl SECONDS` or `?cache_ttl=`, or set a default in site
-config. A TTL of 0 disables it.
+Enable per request with `--cache-ttl SECONDS` or `?cache_ttl=`. A TTL of 0
+disables it. There is no site-config default: making it opt-in per request is
+the point.
 """
 
 from __future__ import annotations

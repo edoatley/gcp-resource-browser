@@ -21,22 +21,22 @@ Prerequisites: `./scripts/setup-gcp.sh`, plus ADC pointed at the quota project
 ## 1. Baseline — does it reach CAI
 
 ```bash
-uv run gcp-explorer list-resources projects/idp-prototype-edo bucket
+uv run gcpe list-resources projects/idp-prototype-edo bucket
 ```
 Expect 2 buckets, with the Project column showing `idp-prototype-edo` (the ID, not the number).
 
 ## 2. Free-text search narrows a result set
 
 ```bash
-uv run gcp-explorer search projects/idp-prototype-edo --type bucket          # 2 buckets
-uv run gcp-explorer search projects/idp-prototype-edo tfstate --type bucket  # 1 of them
+uv run gcpe search projects/idp-prototype-edo --type bucket          # 2 buckets
+uv run gcpe search projects/idp-prototype-edo tfstate --type bucket  # 1 of them
 ```
 The pair is the point: the term must *reduce* 2 to 1, not return everything or nothing.
 
 ## 3. Several types in one upstream call
 
 ```bash
-uv run gcp-explorer search projects/sudoku-eo-2026 \
+uv run gcpe search projects/sudoku-eo-2026 \
     --type cloudrun --type serviceaccount --type topic
 ```
 Expect a mixed table. Check the Type column stays legible — a long name used to squeeze every
@@ -46,16 +46,16 @@ other column to an ellipsis.
 
 ```bash
 # Raw type, in a project that actually has them
-uv run gcp-explorer search projects/sudoku-app-eo --type dns.googleapis.com/ManagedZone
+uv run gcpe search projects/sudoku-app-eo --type dns.googleapis.com/ManagedZone
 
 # RE2 across a whole service — 90+ compute resources live here
-uv run gcp-explorer search projects/gcp-sandbox-2026-18798 --type 'compute.googleapis.com/.*' -n 10
+uv run gcpe search projects/gcp-sandbox-2026-18798 --type 'compute.googleapis.com/.*' -n 10
 
 # Narrower RE2, proving the pattern discriminates rather than matching everything
-uv run gcp-explorer search projects/gcp-sandbox-2026-18798 --type 'compute.googleapis.com/.*wall'
+uv run gcpe search projects/gcp-sandbox-2026-18798 --type 'compute.googleapis.com/.*wall'
 
 # An invalid pattern must fail loudly, not return empty
-uv run gcp-explorer search projects/sudoku-eo-2026 --type 'nonsense.googleapis.com/Nope'; echo "exit=$?"
+uv run gcpe search projects/sudoku-eo-2026 --type 'nonsense.googleapis.com/Nope'; echo "exit=$?"
 ```
 Last one: exit 2 with a message naming the unsupported type.
 
@@ -63,15 +63,15 @@ Last one: exit 2 with a message naming the unsupported type.
 
 ```bash
 # Plain key
-uv run gcp-explorer search projects/idp-prototype-edo --type bucket \
+uv run gcpe search projects/idp-prototype-edo --type bucket \
     --label goog-terraform-provisioned=true --show-query
 
 # Namespaced key — Google's own system labels, which CAI rejects unless quoted
-uv run gcp-explorer search projects/sudoku-eo-2026 --type cloudrun \
+uv run gcpe search projects/sudoku-eo-2026 --type cloudrun \
     --label cloud.googleapis.com/location=us-central1 --show-query
 
 # Negative control: same filter, wrong value. Must return nothing AND show its query.
-uv run gcp-explorer search projects/sudoku-eo-2026 --type cloudrun \
+uv run gcpe search projects/sudoku-eo-2026 --type cloudrun \
     --label cloud.googleapis.com/location=europe-west2
 ```
 The third is the only deliberate empty. It matters *because* the second returned data with the
@@ -81,18 +81,18 @@ same filter shape — together they prove the filter discriminates.
 
 ```bash
 # Locations OR together
-uv run gcp-explorer search projects/sudoku-eo-2026 --type cloudrun \
+uv run gcpe search projects/sudoku-eo-2026 --type cloudrun \
     --location us-central1 --location europe-west1 --show-query
 
 # --project takes an ID; CAI matches on the number, so watch the compiled query
-uv run gcp-explorer search projects/idp-prototype-edo --type bucket \
+uv run gcpe search projects/idp-prototype-edo --type bucket \
     --project idp-prototype-edo --show-query
 ```
 
 ## 7. Truncation is reported, never silent
 
 ```bash
-uv run gcp-explorer search projects/gcp-sandbox-2026-18798 \
+uv run gcpe search projects/gcp-sandbox-2026-18798 \
     --type 'compute.googleapis.com/.*' --limit 5
 ```
 Expect 5 rows plus a warning that more exist.
@@ -101,13 +101,13 @@ Expect 5 rows plus a warning that more exist.
 
 ```bash
 # No --type: every asset type, low-signal resources hidden
-uv run gcp-explorer search projects/gcp-sandbox-2026-18798 --limit 8
+uv run gcpe search projects/gcp-sandbox-2026-18798 --limit 8
 
 # The same search with nothing hidden — note the volume difference
-uv run gcp-explorer search projects/gcp-sandbox-2026-18798 --show-all --limit 8
+uv run gcpe search projects/gcp-sandbox-2026-18798 --show-all --limit 8
 
 # A project where almost everything is noise: must say so, not claim emptiness
-uv run gcp-explorer search projects/ace-gcp-training
+uv run gcpe search projects/ace-gcp-training
 ```
 
 Expect a `N hidden: ...` line naming the top reasons on the first and third, and none on the
@@ -118,7 +118,7 @@ APIs and system log sinks. It must report what it hid, never a bare "No resource
 
 ```bash
 # --limit counts VISIBLE results, not fetched rows
-uv run gcp-explorer search projects/gcp-sandbox-2026-18798 --limit 3
+uv run gcpe search projects/gcp-sandbox-2026-18798 --limit 3
 ```
 Expect exactly 3 real resources, despite ~119 noise rows being skipped to find them.
 
@@ -155,26 +155,26 @@ including it would compare two different questions; step 9 covers that property 
 ```bash
 # Server-side sort. CAI orders it, not us -- sorting locally would order one
 # page of an arbitrary selection, which looks right and is wrong.
-uv run gcp-explorer search projects/sudoku-eo-2026 --type serviceaccount \
+uv run gcpe search projects/sudoku-eo-2026 --type serviceaccount \
     --sort 'displayName DESC'
 
 # An unknown sort field must be REJECTED, not quietly ignored
-uv run gcp-explorer search projects/sudoku-eo-2026 --type bucket --sort bogus; echo "exit=$?"
+uv run gcpe search projects/sudoku-eo-2026 --type bucket --sort bogus; echo "exit=$?"
 
 # Machine-readable output. Payload on stdout, warnings on stderr.
-uv run gcp-explorer search projects/sudoku-eo-2026 -o json 2>/dev/null | jq 'length'
-uv run gcp-explorer search projects/idp-prototype-edo --type bucket -o csv | head -2
+uv run gcpe search projects/sudoku-eo-2026 -o json 2>/dev/null | jq 'length'
+uv run gcpe search projects/idp-prototype-edo --type bucket -o csv | head -2
 
 # Prove stdout stays parseable even when there is plenty to warn about
-uv run gcp-explorer search projects/gcp-sandbox-2026-18798 -o json 2>/dev/null | jq 'length'
+uv run gcpe search projects/gcp-sandbox-2026-18798 -o json 2>/dev/null | jq 'length'
 ```
 The `--sort bogus` case must exit 2 and list the sortable fields.
 
 ### Aggregation
 
 ```bash
-uv run gcp-explorer summary projects/sudoku-eo-2026
-uv run gcp-explorer summary projects/sudoku-eo-2026 -o json | jq '.by_asset_type'
+uv run gcpe summary projects/sudoku-eo-2026
+uv run gcpe summary projects/sudoku-eo-2026 -o json | jq '.by_asset_type'
 ```
 Check the **By project** block names each project once. It previously split one project
 across two rows — an ID row and a project-number row.
@@ -182,7 +182,7 @@ across two rows — an ID row and a project-number row.
 ### IAM enrichment
 
 ```bash
-uv run gcp-explorer search projects/idp-prototype-edo --type bucket --include-iam -o json \
+uv run gcpe search projects/idp-prototype-edo --type bucket --include-iam -o json \
     2>/dev/null | jq '.[] | {display_name, iam_bindings: [.iam_bindings[].role]}'
 ```
 Then read the caveat printed to stderr: these are **attached** bindings only. A grant inherited
@@ -192,7 +192,7 @@ project-level policy comes back as its own row, not attached to the bucket benea
 ```bash
 # Without --include-iam the field is absent, not empty: "not requested" and
 # "nothing granted" must never look alike.
-uv run gcp-explorer search projects/idp-prototype-edo --type bucket -o json \
+uv run gcpe search projects/idp-prototype-edo --type bucket -o json \
     2>/dev/null | jq '.[0] | has("iam_bindings")'      # false
 ```
 
@@ -202,14 +202,14 @@ uv run gcp-explorer search projects/idp-prototype-edo --type bucket -o json \
 # Several scopes at once. This is the route when you hold viewer on individual
 # projects but not on the organization -- CAI checks permission on the scope
 # itself, so organizations/<id> would simply 403.
-uv run gcp-explorer search projects/idp-prototype-edo \
+uv run gcpe search projects/idp-prototype-edo \
     --also-scope projects/sudoku-eo-2026 \
     --also-scope projects/gcp-sandbox-2026-18798 \
     --type bucket --type serviceaccount
 
 # A scope you cannot read must be REPORTED, not silently dropped, and must not
 # cost you the scopes you can read. Expect results plus a FAILED line, exit 7.
-uv run gcp-explorer search projects/idp-prototype-edo \
+uv run gcpe search projects/idp-prototype-edo \
     --also-scope projects/does-not-exist-xyz --type bucket; echo "exit=$?"
 
 # Streaming: rows arrive as CAI returns them
@@ -217,8 +217,8 @@ curl -sN 'http://127.0.0.1:8000/v1/resources/stream?scope=projects/sudoku-eo-202
     | jq -c '{display_name, asset_type}'
 
 # Caching is OFF unless asked for. Repeat an identical search to see the effect.
-uv run gcp-explorer search projects/sudoku-eo-2026 --cache-ttl 60 -o json >/dev/null 2>&1
-time uv run gcp-explorer search projects/sudoku-eo-2026 --cache-ttl 60 -o json >/dev/null 2>&1
+uv run gcpe search projects/sudoku-eo-2026 --cache-ttl 60 -o json >/dev/null 2>&1
+time uv run gcpe search projects/sudoku-eo-2026 --cache-ttl 60 -o json >/dev/null 2>&1
 ```
 
 ### The baseline — run this on the large organization
@@ -295,7 +295,7 @@ it, and deleting it in a later layer does not remove it.
 ## 14. The API, end to end
 
 ```bash
-uv run gcp-explorer serve
+uv run gcpe serve
 ```
 Then in another shell:
 ```bash

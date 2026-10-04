@@ -7,6 +7,11 @@ __pycache__/
 *.egg-info/
 /build/
 /dist/
+.ruff_cache/
+.pytest_cache/
+
+# Exports from `gcpe ... -o csv` (e.g. the README walkthrough); they hold estate data
+*.csv
 
 # Environment / credentials
 .env

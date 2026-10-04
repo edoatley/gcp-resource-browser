@@ -91,7 +91,7 @@ Point Application Default Credentials at the service account:
 
 Then verify:
 
-    uv run gcp-explorer list-resources projects/idp-prototype-edo bucket
+    uv run gcpe list-resources projects/idp-prototype-edo bucket
 
 IAM changes can take up to a minute to propagate; retry once if the first call
 fails with a permission error.

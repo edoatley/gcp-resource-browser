@@ -46,6 +46,7 @@ class FanoutResult:
     suppressed: int = 0
     query: str = ""
     asset_types: list[str] = field(default_factory=list)
+    iam_note: str | None = None
     # Scope -> error message. A partial answer is useful, but only if the gaps
     # are named: silently omitting a scope the caller asked for would
     # under-report the estate, the failure this tool exists to prevent.
@@ -101,6 +102,7 @@ def search_scopes(
             merged.suppressed += result.suppressed
             merged.query = merged.query or result.query
             merged.asset_types = merged.asset_types or result.asset_types
+            merged.iam_note = merged.iam_note or result.iam_note
 
     # as_completed yields in completion order, which varies run to run. Sort so
     # output is reproducible and diffable.

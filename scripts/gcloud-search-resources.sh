@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gcloud equivalent of `gcp-explorer search`.
+# gcloud equivalent of `gcpe search`.
 #
 # Deliberately an INDEPENDENT implementation: it builds the CAI query from the
 # same user-level flags using its own logic, rather than reusing the tool's

@@ -370,3 +370,23 @@ def test_cache_ttl_is_accepted_and_off_by_default(client: TestClient, use_fake) 
     client.get("/v1/resources", params={"scope": "projects/p"})
 
     assert len(fake.requests) == 2, "no caching without an explicit ttl"
+
+
+@pytest.mark.parametrize(
+    ("params", "error"),
+    [
+        ({"scope": "nope"}, "invalid_scope"),
+        ({"scope": "projects/p", "type": "widget"}, "unknown_resource_type"),
+        ({"scope": "projects/p", "sort": "bogus"}, "invalid_filter"),
+    ],
+)
+def test_stream_rejects_a_bad_request_before_streaming(
+    client: TestClient, use_fake, params, error
+) -> None:
+    """A malformed request once came back as an empty 200 -- "nothing matched"."""
+    use_fake(FakeAssetClient())
+
+    response = client.get("/v1/resources/stream", params=params)
+
+    assert response.status_code == 400
+    assert response.json()["error"] == error

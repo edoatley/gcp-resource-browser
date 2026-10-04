@@ -557,3 +557,15 @@ def test_stream_validates_before_yielding_anything() -> None:
 
     with pytest.raises(core.InvalidScopeError):
         next(core.stream_resources(filters(scope="nope"), client=client))
+
+
+def test_an_unrecognised_scope_is_named_in_the_error() -> None:
+    """CAI blanks the scope in its own message, which is useless across several scopes."""
+    client = FakeAssetClient(
+        raises=gcp_exceptions.InvalidArgument(
+            "Invalid scope . Please provide a valid scope: projects/{PROJECT_ID}, ..."
+        )
+    )
+
+    with pytest.raises(core.InvalidScopeError, match="projects/typo"):
+        core.search_resources(filters(scope="projects/typo"), client=client)

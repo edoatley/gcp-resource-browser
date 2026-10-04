@@ -1,22 +1,53 @@
-# Differential-check scripts
+# Scripts
 
-`gcloud` equivalents of what the tool does, for cross-checking results.
+Setup, verification and measurement tooling. Everything here is **read-only** against GCP
+except `setup-gcp.sh`.
 
-The point is to catch a wrong CAI query — the kind of bug where the tool
-returns a plausible-looking result set that is quietly missing rows, or
-filtering client-side when it should be filtering server-side. A test with a
-faked client cannot catch that, because the fake answers whatever the query
-asked. Only a second implementation against the real API can.
+| Script | Purpose |
+|:---|:---|
+| `setup-gcp.sh` | Provision the quota project, service account and viewer grants ([GCP setup](../docs/GCP_SETUP.md)) |
+| `compare-resources.sh` | Diff the tool's results against `gcloud` for the same filters; exits non-zero if they differ |
+| `gcloud-search-resources.sh` | Independent `gcloud` implementation of `search`, emitting normalised JSON lines |
+| `explorer-search-resources.sh` | The tool's own results in the same normalised form (implemented in `_explorer_search.py`) |
+| `check-noise.sh` | Checks that the noise-suppressed result is a strict subset of the full result |
+| `benchmark.py` | Records a latency baseline for the delivery plan |
 
-**Practice: every new capability ships with a `gcloud` equivalent here.** This
-matters most from Phase 2 onward, where `--label` and `--location` compile into
-CAI query syntax and a subtly wrong filter string is easy to miss.
+## Why the differential checks exist
+
+The point is to catch a wrong CAI query: a bug where the tool returns a plausible result that
+is quietly missing rows, or filters locally when it should filter in CAI. A test with a fake
+client can't catch that, because the fake answers whatever it is asked. Only a second,
+independent implementation run against the real API can.
+
+**Practice: every new capability ships with a `gcloud` equivalent here.** This matters most for
+filters, where a slightly wrong query string is easy to miss.
 
 ## Usage
 
+All of these need ADC and Cloud Asset Viewer on the scope.
+
 ```bash
-./scripts/compare-resources.sh projects/my-project bucket
+# Differential check. Takes --scope, --type, --term, --label, --location (all but --scope repeatable or optional)
+./scripts/compare-resources.sh --scope projects/my-project
+./scripts/compare-resources.sh --scope projects/my-project --type bucket
+./scripts/compare-resources.sh --scope organizations/123 --type bucket --type vm \
+    --label env=prod --location europe-west2
+
+# Run either side on its own
+./scripts/gcloud-search-resources.sh --scope projects/my-project --type bucket
+./scripts/explorer-search-resources.sh --scope projects/my-project --type bucket
+
+# Noise reduction may only remove rows, never add or alter them
+./scripts/check-noise.sh projects/my-project
+
+# Latency baseline; --scope is repeatable
+uv run python -m scripts.benchmark --scope organizations/123456789 --repeats 3 --limit 1000
 ```
 
-Both sides need `gcloud auth application-default login` and Cloud Asset Viewer
-on the scope.
+`setup-gcp.sh` reads `PROJECT_ID` (default `gcp-resource-browser-eo`) and `SA_NAME` (default
+`resource-browser`) from the environment. Edit `TARGET_PROJECTS` in the script to list the
+projects to grant on, and re-run it after adding one, since it is idempotent.
+
+## Not yet covered
+
+The differential scripts do not yet cover `--project`, `--raw-query` or `--sort`.

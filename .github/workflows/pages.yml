@@ -1,0 +1,40 @@
+name: API reference
+
+# Publishes openapi.yml as a browsable Swagger UI page on GitHub Pages.
+# CI already guarantees openapi.yml matches the code, so this only copies it.
+on:
+  push:
+    branches: [main]
+    paths: [openapi.yml, docs/api/**, .github/workflows/pages.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble site
+        run: |
+          mkdir _site
+          cp docs/api/index.html _site/
+          cp openapi.yml _site/
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -17,7 +17,8 @@ from rich.table import Table
 from app import core
 from app.aggregate import summarise
 from app.fanout import DEFAULT_MAX_CONCURRENCY, search_scopes
-from app.output import OutputFormat, to_csv, to_json
+from app.gcloud import search_command
+from app.output import OutputFormat, summary_to_csv, to_csv, to_json
 from app.params import DEFAULT_LIMIT, Help, SearchFilters
 
 cli = typer.Typer(help="GCP Resource Explorer CLI", no_args_is_help=True)
@@ -56,16 +57,55 @@ def _search_many(
     max_concurrency: int,
     output: OutputFormat,
     show_query: bool,
+    show_gcloud: bool = False,
 ) -> None:
     """Search several scopes concurrently and render the merged result."""
+    # Before the search: reading ADC may spawn `gcloud`, and forking after gRPC
+    # has started prints a gRPC warning to stderr.
+    billing_project = core.adc_quota_project() if show_gcloud else None
     try:
         with console.status(f"Searching {len(scopes)} scopes..."):
             merged = search_scopes(scopes, filters, max_concurrency=max_concurrency)
     except core.ResourceExplorerError as exc:
         raise _fail(exc) from exc
 
+    if show_gcloud:
+        # One command per scope: gcloud has no multi-scope search. Per-scope
+        # suppression counts are not kept, so none is claimed here.
+        _print_gcloud(
+            "\n\n".join(
+                search_command(
+                    scope=scope,
+                    asset_types=merged.asset_types,
+                    query=merged.query,
+                    order_by=core.build_order_by(filters.sort),
+                    include_iam=filters.include_iam,
+                    billing_project=billing_project,
+                )
+                for scope in scopes
+                if scope not in merged.failures
+            ),
+            output,
+        )
+
+    # The same notes a single-scope search gives, so adding --also-scope never
+    # makes truncation, suppression or the IAM caveat disappear. In
+    # machine-readable mode they go to stderr to keep stdout parseable.
+    notes = []
+    if merged.truncated:
+        notes.append(
+            f"Showing the first {filters.limit} results per scope; more exist. "
+            "Use --limit to raise the cap."
+        )
+    if merged.suppressed:
+        notes.append(f"{merged.suppressed} hidden. Use --show-all to include them.")
+    if merged.iam_note:
+        notes.append(merged.iam_note)
+
     if output is not OutputFormat.TABLE:
         _emit(merged.resources, output)
+        for note in notes:
+            err_console.print(note)
     else:
         if show_query and merged.query:
             console.print(f"[dim]CAI query: {merged.query}[/dim]")
@@ -73,8 +113,8 @@ def _search_many(
             _render_table(merged.resources, f"GCP resources across {len(scopes)} scopes")
         else:
             console.print("[yellow]No resources found.[/yellow]")
-        if merged.suppressed:
-            console.print(f"[dim]{merged.suppressed} hidden. Use --show-all.[/dim]")
+        for note in notes:
+            console.print(f"[dim]{note}[/dim]")
 
     # Failures are never silent: a partial answer that looks complete would
     # under-report the estate, which is the failure this tool exists to prevent.
@@ -82,6 +122,15 @@ def _search_many(
         err_console.print(f"[red]FAILED[/red] {failed_scope}: {reason}")
     if merged.failures:
         raise typer.Exit(code=EXIT_PARTIAL)
+
+
+def _print_gcloud(command: str, output: OutputFormat) -> None:
+    """Show the gcloud equivalent without corrupting machine-readable stdout."""
+    target = console if output is OutputFormat.TABLE else err_console
+    # markup=False: a query or label value may contain `[...]`, which rich
+    # would otherwise swallow as a style tag, printing a different command.
+    target.print(command, markup=False, highlight=False, soft_wrap=True)
+    target.print()
 
 
 def _emit(resources: list, output: OutputFormat) -> None:
@@ -182,6 +231,11 @@ def search(
     show_query: bool = typer.Option(
         False, "--show-query", help="Print the CAI query the filters compiled to"
     ),
+    show_gcloud: bool = typer.Option(
+        False,
+        "--show-gcloud",
+        help="Print the equivalent `gcloud asset search-all-resources` command",
+    ),
     show_all: bool = typer.Option(False, "--show-all", help=Help.SHOW_ALL),
     sort: list[str] = typer.Option([], "--sort", help=Help.SORT),
     include_iam: bool = typer.Option(False, "--include-iam", help=Help.INCLUDE_IAM),
@@ -216,28 +270,35 @@ def search(
     )
 
     if also_scope:
-        _search_many([scope, *also_scope], filters, max_concurrency, output, show_query)
+        _search_many(
+            [scope, *also_scope], filters, max_concurrency, output, show_query, show_gcloud
+        )
         return
 
+    # Before the search: reading ADC may spawn `gcloud`, and forking after gRPC
+    # has started prints a gRPC warning to stderr.
+    billing_project = core.adc_quota_project() if show_gcloud else None
     try:
         with console.status(f"Searching {scope}..."):
-            result = core.search_resources(
-                SearchFilters(
-                    scope=scope,
-                    resource_types=resource_type,
-                    free_text=term,
-                    labels=label,
-                    locations=location,
-                    projects=project,
-                    raw_query=raw_query,
-                    limit=limit,
-                    show_all=show_all,
-                    sort=sort,
-                    include_iam=include_iam,
-                )
-            )
+            result = core.search_resources(filters)
     except core.ResourceExplorerError as exc:
         raise _fail(exc) from exc
+
+    if show_gcloud:
+        _print_gcloud(
+            search_command(
+                scope=scope,
+                asset_types=result.asset_types,
+                query=result.query,
+                order_by=core.build_order_by(sort),
+                limit=limit,
+                truncated=result.truncated,
+                suppressed=result.suppressed,
+                include_iam=include_iam,
+                billing_project=billing_project,
+            ),
+            output,
+        )
 
     if output is not OutputFormat.TABLE:
         # Machine-readable output goes to stdout alone; notes go to stderr so a
@@ -259,6 +320,7 @@ def list_resources(
     resource_type: str = typer.Argument(..., help="Resource type, e.g. 'bucket'"),
     query: str = typer.Option("", "--query", "-q", help=Help.TERM),
     limit: int = typer.Option(DEFAULT_LIMIT, "--limit", "-n", min=1, help=Help.LIMIT),
+    show_all: bool = typer.Option(False, "--show-all", help=Help.SHOW_ALL),
 ) -> None:
     """Query one resource type and print a table (single-type form of `search`)."""
     try:
@@ -269,6 +331,7 @@ def list_resources(
                     resource_types=[resource_type],
                     free_text=query,
                     limit=limit,
+                    show_all=show_all,
                 )
             )
     except core.ResourceExplorerError as exc:
@@ -281,14 +344,19 @@ def list_resources(
         show_query=False,
     )
     _warn_if_truncated(result, limit)
+    # Noise rules apply to a named type too (default subnets, default routes),
+    # so this path must report what it hid just as `search` does.
+    _report_suppressed(result)
 
 
 @cli.command("summary")
 def summary_command(
     scope: str = typer.Argument(..., help=Help.SCOPE),
+    term: str = typer.Argument("", help=Help.TERM),
     resource_type: list[str] = typer.Option([], "--type", "-t", help=Help.TYPE),
     label: list[str] = typer.Option([], "--label", "-l", help=Help.LABEL),
     location: list[str] = typer.Option([], "--location", help=Help.LOCATION),
+    project: list[str] = typer.Option([], "--project", help=Help.PROJECT),
     show_all: bool = typer.Option(False, "--show-all", help=Help.SHOW_ALL),
     output: OutputFormat = typer.Option(OutputFormat.TABLE, "--output", "-o", help=Help.OUTPUT),
 ) -> None:
@@ -299,8 +367,10 @@ def summary_command(
                 SearchFilters(
                     scope=scope,
                     resource_types=resource_type,
+                    free_text=term,
                     labels=label,
                     locations=location,
+                    projects=project,
                     show_all=show_all,
                     # No limit: a summary of a truncated set would be a lie.
                     limit=None,
@@ -313,6 +383,9 @@ def summary_command(
 
     if output is OutputFormat.JSON:
         print(totals.model_dump_json(indent=2))
+        return
+    if output is OutputFormat.CSV:
+        print(summary_to_csv(totals), end="")
         return
 
     console.print(

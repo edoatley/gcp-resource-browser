@@ -10,8 +10,9 @@ whole project, folder or organisation, with filters evaluated server-side.
 > JSON/CSV output, concurrent multi-scope search, streaming, and a container image with CI.
 > Phase 4's tuning is built but its baseline still needs measuring on a real organisation —
 > run `scripts/benchmark.py` there. Phase 8 adds high-risk role and grant review, covering
-> custom roles and billing-account IAM, all verified against a real estate. Group expansion
-> (Phase 8) and `gcpe docs`, an interactive capability browser (Phase 9), are written up in
+> custom roles and billing-account IAM, all verified against a real estate. Phase 9 has begun:
+> a tested catalogue of every capability (`app/capabilities.py`) is in, and the `gcpe docs`
+> browser over it is next. That browser and Phase 8's group expansion are written up in
 > [`docs/todo/`](docs/todo/) and still to come. See the
 > [delivery plan](docs/DELIVERY_PLAN.md).
 

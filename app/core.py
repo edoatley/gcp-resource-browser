@@ -895,6 +895,17 @@ def _validate_grant_filters(
     return minimum, types
 
 
+def grant_queries(minimum: role_risk.Risk, member_types: Sequence[str]) -> list[str]:
+    """The CAI IAM-policy queries a grant search sends, one per permission batch.
+
+    Pure, so the capability catalogue can render the gcloud form of a grant
+    search without running it, from the same compilation the search uses.
+    """
+    permissions = [r.permission for r in role_risk.rules_at_least(minimum)]
+    batches = role_risk.permission_batches(permissions, len(member_types))
+    return [grant_query(batch, member_types) for batch in batches]
+
+
 def search_grants(
     filters: GrantFilters, client: asset_v1.AssetServiceClient | None = None
 ) -> GrantList:
@@ -912,8 +923,7 @@ def search_grants(
     )
 
     rules = {r.permission: r for r in role_risk.rules_at_least(minimum)}
-    batches = role_risk.permission_batches(list(rules), len(member_types))
-    queries = [grant_query(batch, member_types) for batch in batches]
+    queries = grant_queries(minimum, member_types)
     client = client or get_client()
 
     # (resource, role, member, condition) -> grant; batches overlap on roles

@@ -30,6 +30,7 @@ Regenerate it after changing the API with `uv run gcpe openapi --out openapi.yml
 | `GET /v1/types` | Friendly type names mapped to CAI asset types |
 | `GET /v1/roles` | IAM roles classed as risky, with the permissions and sources behind each |
 | `GET /v1/grants` | Principals holding risky roles across a scope |
+| `GET /v1/billing-grants` | Principals holding risky roles on a billing account |
 | `GET /healthz` | Liveness: `{"status": "ok"}`, makes no external calls |
 | `GET /readyz` | Readiness: `200` when ADC resolves, `503` otherwise; never calls CAI |
 
@@ -159,13 +160,17 @@ This lists friendly names only. Any raw CAI type is accepted wherever `type` is.
 
 ### `GET /v1/roles`
 
-Lists predefined roles containing at least one permission at or above `risk`. Risk comes from
+Lists roles containing at least one permission at or above `risk`. Risk comes from
 permissions, not role names: see [Role risk](ROLE_RISK.md) for every rule and its quoted
 source.
+
+Predefined roles always. Pass `scope` to add the **custom roles** defined on an organization
+or a project; they are classified by the same rules, and marked `custom: true`.
 
 | Parameter | Type | Default | Description |
 |:---|:---|:---|:---|
 | `risk` | `high` \| `medium` | `high` | Lowest risk included. `medium` returns medium and high. |
+| `scope` | `organizations/<id>` \| `projects/<id>` | | Also list the custom roles defined on this scope. A folder scope is rejected: IAM has no folder-level custom roles. |
 | `show_all` | bool | `false` | Include Google service-agent roles, which are hidden and counted by default |
 
 ```bash
@@ -200,9 +205,17 @@ curl -s 'http://127.0.0.1:8000/v1/roles?risk=high' | jq -r '.data[] | "\(.name) 
 }
 ```
 
-`sources` contains every source cited by the roles returned, each quoted. The role catalogue
-comes from the IAM API (`iam.googleapis.com` must be enabled on the quota project) and is
-cached for 24 hours.
+`sources` contains every source cited by the roles returned, each quoted. The predefined role
+catalogue comes from the IAM API (`iam.googleapis.com` must be enabled on the quota project)
+and is cached for 24 hours. **Custom roles are not cached** — they are your own data, and a
+day-old copy could hide the change you are verifying. Listing them needs `iam.roles.list` on
+the scope (`roles/iam.roleViewer`).
+
+`coverage_note` says which roles the listing could see. The limit worth knowing: an
+organization scope lists the custom roles defined **on the organization**, not those defined
+inside each of its projects — that would take one call per project, which this tool does not
+do. `GET /v1/grants` matches custom roles at any level regardless, because it matches on
+permissions rather than on names.
 
 ### `GET /v1/grants`
 
@@ -231,7 +244,7 @@ curl -s 'http://127.0.0.1:8000/v1/grants?scope=organizations/123&role_risk=high&
   "count": 1,
   "truncated": false,
   "suppressed": 0,
-  "coverage_note": "Covers the organization and everything beneath it. Billing account IAM is not indexed by Cloud Asset Inventory and is not included. Group membership is not expanded: a group grant applies to every member.",
+  "coverage_note": "Covers the organization and everything beneath it. Billing account IAM is not indexed by Cloud Asset Inventory and is not included here; run `gcpe billing-grants` (GET /v1/billing-grants) for it. Group membership is not expanded: a group grant applies to every member.",
   "grants": [
     {
       "resource": "//cloudresourcemanager.googleapis.com/organizations/123",
@@ -255,6 +268,59 @@ curl -s 'http://127.0.0.1:8000/v1/grants?scope=organizations/123&role_risk=high&
 | `matched_permissions` | The risky permissions in this role that CAI matched: *why* the grant is listed |
 | `condition` | The IAM condition expression, when the binding is conditional |
 | `suppressed` | Grants to Google service agents that were hidden |
+| `coverage_note` | What the search cannot see. **Read it before treating the list as complete.** |
+
+### `GET /v1/billing-grants`
+
+Returns every principal holding a role at or above `role_risk` **on a billing account**.
+
+There is no `scope`. Cloud Asset Inventory does not index billing accounts, and
+`billingAccounts/…` is not a valid CAI scope, so `GET /v1/grants` cannot see these grants at
+any scope. This reads the Cloud Billing API instead: one `billingAccounts.list`, then one
+`getIamPolicy` per account you can see. It needs `roles/billing.viewer` and
+`cloudbilling.googleapis.com` enabled on the quota project.
+
+| Parameter | Type | Default | Description |
+|:---|:---|:---|:---|
+| `role_risk` | `high` \| `medium` | `high` | Lowest role risk included |
+| `member_type` | repeatable | all | As for `/v1/grants` |
+| `group_by` | `member` \| `role` | | Add `groups`: what each principal holds, or who holds each role |
+| `show_all` | bool | `false` | Include grants to Google service agents |
+| `limit` | int, 1–10000 | `1000` | Maximum grants returned. `truncated` reports when more exist. |
+
+```bash
+curl -s 'http://127.0.0.1:8000/v1/billing-grants?role_risk=high' | jq '.grants'
+```
+
+```json
+{
+  "min_risk": "high",
+  "member_types": [],
+  "accounts": ["billingAccounts/01AAAA-BBBBBB-CCCCCC"],
+  "count": 1,
+  "truncated": false,
+  "suppressed": 0,
+  "unclassified_roles": [],
+  "coverage_note": "Every billing account this caller can see. Billing accounts are not under an organization in the IAM hierarchy, so no scope bounds them …",
+  "grants": [
+    {
+      "resource": "//cloudbilling.googleapis.com/billingAccounts/01AAAA-BBBBBB-CCCCCC",
+      "asset_type": "cloudbilling.googleapis.com/BillingAccount",
+      "display_name": "Engineering",
+      "role": "roles/billing.admin",
+      "member": "user:finance@example.com",
+      "member_type": "user",
+      "risk": "high",
+      "matched_permissions": ["billing.accounts.setIamPolicy"]
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+|:---|:---|
+| `accounts` | The billing accounts read — one `getIamPolicy` each. An empty list means none were **visible**, which is not the same as none existing. |
+| `unclassified_roles` | Roles granted on an account whose permissions are not in the predefined catalogue, usually custom roles. The Cloud Billing API returns role names only, so these cannot be classified here. **They are listed, not dropped** — review them by hand. |
 | `coverage_note` | What the search cannot see. **Read it before treating the list as complete.** |
 
 ## Errors

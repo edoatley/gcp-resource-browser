@@ -17,7 +17,7 @@ from rich.table import Table
 from app import core
 from app.aggregate import summarise
 from app.fanout import DEFAULT_MAX_CONCURRENCY, search_scopes
-from app.gcloud import grants_command, search_command
+from app.gcloud import billing_grants_command, grants_command, roles_command, search_command
 from app.output import (
     OutputFormat,
     grants_to_csv,
@@ -26,7 +26,13 @@ from app.output import (
     to_csv,
     to_json,
 )
-from app.params import DEFAULT_LIMIT, GrantFilters, Help, SearchFilters
+from app.params import (
+    DEFAULT_LIMIT,
+    BillingGrantFilters,
+    GrantFilters,
+    Help,
+    SearchFilters,
+)
 
 cli = typer.Typer(help="GCP Resource Explorer CLI", no_args_is_help=True)
 console = Console()
@@ -419,45 +425,60 @@ def _risk_style(risk: str) -> str:
 
 
 @cli.command("roles")
-def roles_command(
+def roles_command_cli(
     risk: str = typer.Option("high", "--risk", "-r", help=Help.RISK),
+    scope: str | None = typer.Option(None, "--scope", "-s", help=Help.ROLE_SCOPE),
     show_all: bool = typer.Option(False, "--show-all", help=Help.SHOW_ALL_AGENTS),
     output: OutputFormat = typer.Option(OutputFormat.TABLE, "--output", "-o", help=Help.OUTPUT),
+    show_gcloud: bool = typer.Option(
+        False, "--show-gcloud", help="Print the equivalent `gcloud iam roles list` command(s)"
+    ),
 ) -> None:
     """List IAM roles classed as risky, and the permissions that make them so.
 
-    A role's risk is the highest risk of any permission it contains. The rules
-    and the sources behind them are in docs/ROLE_RISK.md.
+    A role's risk is the highest risk of any permission it contains. Pass
+    --scope to include the custom roles defined on an organization or project;
+    they are judged on the same rules. The sources are in docs/ROLE_RISK.md.
     """
     try:
         with console.status("Reading the IAM role catalogue..."):
-            roles = core.list_risky_roles(risk, show_all=show_all)
+            roles = core.list_risky_roles(risk, show_all=show_all, scope=scope)
     except core.ResourceExplorerError as exc:
         raise _fail(exc) from exc
 
+    if show_gcloud:
+        _print_gcloud(roles_command(scope, roles.min_risk), output)
+
+    notes = [roles.coverage_note]
+    if roles.suppressed_summary:
+        notes.append(roles.suppressed_summary)
+
     if output is OutputFormat.JSON:
         print(roles.model_dump_json(indent=2))
+        for note in notes:
+            err_console.print(note)
         return
     if output is OutputFormat.CSV:
         print(roles_to_csv(roles), end="")
-        if roles.suppressed_summary:
-            err_console.print(roles.suppressed_summary)
+        for note in notes:
+            err_console.print(note)
         return
 
-    table = Table(title=f"IAM roles at {roles.min_risk} risk or above")
+    title = f"IAM roles at {roles.min_risk} risk or above"
+    table = Table(title=f"{title} (+ custom roles on {scope})" if scope else title)
     table.add_column("Role", style="cyan", no_wrap=True)
     table.add_column("Risk")
     table.add_column("Because it can", overflow="fold")
     for role in roles.data:
         table.add_row(
-            role.name,
+            role.name + (" [magenta](custom)[/magenta]" if role.custom else ""),
             f"[{_risk_style(role.risk)}]{role.risk}[/]",
             "\n".join(f"{p.permission}" for p in role.permissions),
         )
     console.print(table)
     console.print(f"[dim]{roles.count} role(s). Sources: docs/ROLE_RISK.md[/dim]")
-    if roles.suppressed_summary:
-        console.print(f"[dim]{roles.suppressed_summary}[/dim]")
+    for note in notes:
+        console.print(f"[dim]{note}[/dim]")
 
 
 @cli.command("grants")
@@ -544,6 +565,104 @@ def grants_command_cli(
                 grant.role + (" [dim](conditional)[/dim]" if grant.condition else ""),
                 f"[{_risk_style(grant.risk)}]{grant.risk}[/]",
                 grant.resource.removeprefix("//"),
+            )
+        console.print(table)
+    for note in notes:
+        console.print(f"[dim]{note}[/dim]")
+
+
+@cli.command("billing-grants")
+def billing_grants_command_cli(
+    role_risk: str = typer.Option("high", "--role-risk", "-r", help=Help.RISK),
+    member_type: list[str] = typer.Option([], "--member-type", "-m", help=Help.MEMBER_TYPE),
+    by: str | None = typer.Option(None, "--by", help=Help.GROUP_BY),
+    show_all: bool = typer.Option(False, "--show-all", help=Help.SHOW_ALL_AGENTS),
+    limit: int = typer.Option(DEFAULT_LIMIT, "--limit", "-n", min=1, help=Help.LIMIT),
+    output: OutputFormat = typer.Option(OutputFormat.TABLE, "--output", "-o", help=Help.OUTPUT),
+    show_gcloud: bool = typer.Option(
+        False, "--show-gcloud", help="Print the equivalent `gcloud billing` command(s)"
+    ),
+) -> None:
+    """Find principals holding risky roles on a billing account.
+
+    Billing account IAM is not in Cloud Asset Inventory, so `gcpe grants`
+    cannot see it however wide its scope. This reads the Cloud Billing API
+    instead and takes no scope: it covers every billing account you can see.
+    """
+    try:
+        with console.status(f"Reading billing account IAM for {role_risk}-risk grants..."):
+            result = core.search_billing_grants(
+                BillingGrantFilters(
+                    min_risk=role_risk,
+                    member_types=member_type,
+                    show_all=show_all,
+                    limit=limit,
+                    group_by=by,
+                )
+            )
+    except core.ResourceExplorerError as exc:
+        raise _fail(exc) from exc
+
+    if show_gcloud:
+        _print_gcloud(billing_grants_command(result.accounts), output)
+
+    notes = [f"{len(result.accounts)} billing account(s) read.", result.coverage_note]
+    if result.truncated:
+        notes.append(f"Showing the first {limit} grants; more exist. Use --limit to raise the cap.")
+    if result.suppressed_summary:
+        notes.append(result.suppressed_summary)
+    if result.unclassified_roles:
+        notes.append(
+            f"{len(result.unclassified_roles)} role(s) could not be classified and are NOT "
+            f"in the rows above: {', '.join(result.unclassified_roles)}. They are not in the "
+            "predefined catalogue, so their permissions are unknown here; review them by hand."
+        )
+
+    if output is not OutputFormat.TABLE:
+        print(
+            result.model_dump_json(indent=2, exclude_none=True)
+            if output is OutputFormat.JSON
+            else grants_to_csv(result),
+            end="\n" if output is OutputFormat.JSON else "",
+        )
+        for note in notes:
+            err_console.print(note)
+        return
+
+    if not result.accounts:
+        console.print(
+            "[yellow]No billing accounts visible to these credentials.[/yellow] "
+            "That is not the same as none existing: it needs roles/billing.viewer."
+        )
+    elif not result.grants:
+        console.print(f"[green]No {result.min_risk}-risk billing grants found.[/green]")
+    elif result.groups is not None:
+        table = Table(title=f"{result.min_risk.capitalize()}-risk billing grants, by {by}")
+        table.add_column(by.capitalize(), style="cyan", overflow="fold")
+        table.add_column("Risk")
+        table.add_column("Roles" if by == "member" else "Members", no_wrap=by == "member")
+        table.add_column("Accounts", justify="right")
+        for group in result.groups:
+            table.add_row(
+                group.key,
+                f"[{_risk_style(group.highest_risk)}]{group.highest_risk}[/]",
+                "\n".join(group.roles or group.members or []),
+                str(group.resource_count),
+            )
+        console.print(table)
+    else:
+        table = Table(title=f"{result.min_risk.capitalize()}-risk billing account grants")
+        table.add_column("Member", style="cyan", overflow="fold")
+        table.add_column("Role", style="magenta", no_wrap=True)
+        table.add_column("Risk")
+        table.add_column("Billing account", overflow="fold")
+        for grant in result.grants:
+            account = grant.resource.rsplit("/", 1)[-1]
+            table.add_row(
+                grant.member,
+                grant.role + (" [dim](conditional)[/dim]" if grant.condition else ""),
+                f"[{_risk_style(grant.risk)}]{grant.risk}[/]",
+                f"{account} ({grant.display_name})" if grant.display_name else account,
             )
         console.print(table)
     for note in notes:

@@ -12,7 +12,7 @@ import io
 import json
 from enum import StrEnum
 
-from app.models import GrantList, Resource, RoleList, Summary
+from app.models import BillingGrantList, GrantList, Resource, RoleList, Summary
 
 
 class OutputFormat(StrEnum):
@@ -80,13 +80,16 @@ GRANT_CSV_COLUMNS = (
     "member_type",
     "role",
     "resource",
+    "display_name",
     "asset_type",
     "matched_permissions",
     "condition",
 )
 
 
-def grants_to_csv(grants: GrantList) -> str:
+def grants_to_csv(grants: GrantList | BillingGrantList) -> str:
+    """One row per grant. Shared by the CAI and billing searches: a `Grant` is a
+    `Grant` whichever API reported it, and one column set keeps the two diffable."""
     buffer = io.StringIO()
     writer = csv.DictWriter(buffer, fieldnames=GRANT_CSV_COLUMNS, extrasaction="ignore")
     writer.writeheader()
@@ -100,13 +103,14 @@ def grants_to_csv(grants: GrantList) -> str:
 def roles_to_csv(roles: RoleList) -> str:
     buffer = io.StringIO()
     writer = csv.writer(buffer)
-    writer.writerow(("name", "title", "risk", "permissions", "sources"))
+    writer.writerow(("name", "title", "risk", "custom", "permissions", "sources"))
     for role in roles.data:
         writer.writerow(
             (
                 role.name,
                 role.title or "",
                 role.risk,
+                str(role.custom).lower(),
                 " ".join(p.permission for p in role.permissions),
                 " ".join(sorted({s for p in role.permissions for s in p.sources})),
             )

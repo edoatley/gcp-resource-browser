@@ -12,6 +12,9 @@ account on Cloud Run or GKE.
 | Cloud Asset API (`cloudasset.googleapis.com`) enabled | The **quota project** that ADC bills calls to |
 | `roles/cloudasset.viewer` | Each **scope** you search (project, folder or organisation) |
 | IAM API (`iam.googleapis.com`) enabled | The **quota project**. Needed only for `gcpe roles` / `GET /v1/roles`. |
+| `roles/iam.roleViewer` | Each **scope** whose *custom* roles you list with `gcpe roles --scope`. Not needed for predefined roles. |
+| Cloud Billing API (`cloudbilling.googleapis.com`) enabled | The **quota project**. Needed only for `gcpe billing-grants` / `GET /v1/billing-grants`. |
+| `roles/billing.viewer` | Each **billing account** you want `gcpe billing-grants` to see. Without it the account is invisible, which the CLI reports rather than calling it clean. |
 
 Google returns HTTP 403 for both failures, but the fixes are different and usually apply to
 different projects. The tool tells them apart:
@@ -29,7 +32,7 @@ to run. Trust that over the scope you searched.
 `scripts/setup-gcp.sh` provisions:
 
 - a dedicated project (`gcp-resource-browser-eo`) to act as the API and quota home
-- the Cloud Asset, IAM Credentials and IAM APIs on that project
+- the Cloud Asset, IAM Credentials, IAM and Cloud Billing APIs on that project
 - a read-only service account (`resource-browser@…`)
 - `cloudasset.viewer` grants on each project listed in `TARGET_PROJECTS` in the script
 
@@ -48,6 +51,10 @@ gcloud auth application-default set-quota-project gcp-resource-browser-eo
 
 The script uses impersonation rather than a downloaded JSON key, so there is no long-lived
 credential on disk to leak or rotate.
+
+`setup-gcp.sh` also grants `roles/billing.viewer` on every billing account it can see, and
+`roles/iam.roleViewer` on `$ORGANIZATION_ID` if you set it. Both are optional capabilities, so
+a failure there is reported and skipped rather than fatal.
 
 **Billing is not required.** The Cloud Asset API can be enabled on an unbilled project and its
 search calls are free. The script deliberately skips linking a billing account, because doing

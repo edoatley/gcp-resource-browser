@@ -117,3 +117,49 @@ def grants_command(scope: str, queries: Sequence[str], billing_project: str | No
         flags = [f"--scope={shlex.quote(scope)}", f"--query={shlex.quote(query)}", *billing]
         lines.append(_command("search-all-iam-policies", flags))
     return "\n".join(lines)
+
+
+def roles_command(scope: str | None = None, min_risk: str = "high") -> str:
+    """The gcloud command(s) behind a risky-role listing.
+
+    `gcloud iam roles list` has no notion of risk, so this lists the same
+    roles the tool classified and says where the classification came from.
+    The real check is `scripts/compare-roles.sh`, which reclassifies with jq.
+    """
+    lines = [
+        "# gcloud cannot filter by risk: these list the catalogue the tool classified at",
+        f"# {min_risk} risk or above, using app/role_risk_rules.json.",
+        "gcloud iam roles list --format='table(name,title,stage)'",
+    ]
+    if scope:
+        level, _, ident = scope.partition("/")
+        flag = "--organization" if level == "organizations" else "--project"
+        lines.append("")
+        lines.append(f"# Custom roles defined on {scope}:")
+        lines.append(
+            f"gcloud iam roles list {flag}={shlex.quote(ident)} --format='table(name,title,stage)'"
+        )
+    return "\n".join(lines)
+
+
+def billing_grants_command(accounts: Sequence[str] = ()) -> str:
+    """The gcloud command(s) for a billing-account grant search.
+
+    Billing account IAM is not in Cloud Asset Inventory, so there is no
+    `gcloud asset` equivalent -- this is the Cloud Billing API, one policy
+    read per account, which is exactly what the tool does.
+    """
+    lines = [
+        "# Billing account IAM is not indexed by Cloud Asset Inventory, so this uses the",
+        "# Cloud Billing API. gcloud returns whole policies: expect non-risky roles and",
+        "# Google service agents too, which this tool filters out of the rows it reports.",
+        "gcloud billing accounts list --format='value(name)'",
+    ]
+    for account in accounts:
+        ident = account.removeprefix("billingAccounts/")
+        lines.append(f"gcloud billing accounts get-iam-policy {shlex.quote(ident)}")
+    if not accounts:
+        lines.append("")
+        lines.append("# Then, for each account listed above:")
+        lines.append("gcloud billing accounts get-iam-policy BILLING_ACCOUNT_ID")
+    return "\n".join(lines)

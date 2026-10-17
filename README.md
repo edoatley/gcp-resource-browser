@@ -9,8 +9,11 @@ whole project, folder or organisation, with filters evaluated server-side.
 > noise reduction, server-side filtering and sorting, IAM enrichment, aggregated summaries, and
 > JSON/CSV output, concurrent multi-scope search, streaming, and a container image with CI.
 > Phase 4's tuning is built but its baseline still needs measuring on a real organisation —
-> run `scripts/benchmark.py` there. Phase 8 adds high-risk role and grant review; billing-account
-> IAM and group expansion are still to come. See the [delivery plan](docs/DELIVERY_PLAN.md).
+> run `scripts/benchmark.py` there. Phase 8 adds high-risk role and grant review, including
+> billing-account IAM. Custom-role *listing* is built but unproven — no estate with custom
+> roles has run the check yet. Group expansion (Phase 8) and `gcpe docs`, an interactive
+> capability browser (Phase 9), are written up in [`docs/todo/`](docs/todo/) and still to
+> come. See the [delivery plan](docs/DELIVERY_PLAN.md).
 
 ## Quickstart
 
@@ -24,6 +27,7 @@ uv run gcpe search projects/my-project                       # everything, noise
 uv run gcpe search organizations/123 backup --type bucket    # one call, whole org
 uv run gcpe summary organizations/123                        # counts by type/project/location
 uv run gcpe grants organizations/123 --by member             # who holds high-risk roles
+uv run gcpe billing-grants                                   # ... on a billing account
 
 uv run gcpe serve                                            # API on http://127.0.0.1:8000
 curl 'http://127.0.0.1:8000/v1/resources?scope=projects/my-project&type=bucket'
@@ -186,14 +190,20 @@ them. Risk comes from the permissions a role contains, and the evidence for ever
 
 ```bash
 uv run gcpe roles --risk high                              # Owner, Editor, Billing Admin, Org Admin, ...
+uv run gcpe roles --scope $SCOPE                           # + the custom roles defined there
 uv run gcpe grants $SCOPE                                  # every high-risk grant
 uv run gcpe grants $SCOPE --by member                      # rolled up: what each principal holds
 uv run gcpe grants $SCOPE --member-type user --member-type group --role-risk medium
+uv run gcpe billing-grants --by member                     # who can administer a billing account
 ```
 
 Google's own service agents are hidden and counted (`--show-all` includes them). Each result
 also says what the scope cannot see. In particular, searching a project misses grants made on
 its folders and organisation, so search the organisation to cover every level.
+
+Billing accounts need their own command: Cloud Asset Inventory does not index them, so no
+`grants` scope reaches them however wide. `billing-grants` reads the Cloud Billing API instead
+and covers every account your credentials can see.
 
 **10. Use the HTTP API.** Searches, summaries, type listings, risky roles and grants are also
 available over HTTP (multi-scope search is CLI-only):
@@ -204,8 +214,9 @@ uv run gcpe serve &
 curl -s "http://127.0.0.1:8000/v1/resources?scope=$SCOPE&type=bucket" | jq '{count, query, truncated}'
 curl -s "http://127.0.0.1:8000/v1/summary?scope=$SCOPE" | jq .by_asset_type
 curl -sN "http://127.0.0.1:8000/v1/resources/stream?scope=$SCOPE" | head -5   # NDJSON, as rows arrive
-curl -s "http://127.0.0.1:8000/v1/roles?risk=high" | jq -r '.data[].name'
+curl -s "http://127.0.0.1:8000/v1/roles?risk=high&scope=$SCOPE" | jq -r '.data[].name'
 curl -s "http://127.0.0.1:8000/v1/grants?scope=$SCOPE&role_risk=high&group_by=member" | jq .groups
+curl -s "http://127.0.0.1:8000/v1/billing-grants?role_risk=high" | jq '.grants, .unclassified_roles'
 ```
 
 Open <http://127.0.0.1:8000/docs> to explore and call every endpoint in your browser. The

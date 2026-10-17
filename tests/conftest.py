@@ -170,3 +170,64 @@ def service_disabled_error(
         f"{service} has not been used in project {quota_project} before or it is disabled.",
         details=[info],
     )
+
+
+# --- REST fakes (IAM role catalogue, Cloud Billing) --------------------------
+#
+# Both live behind an AuthorizedSession rather than a generated client, so a
+# fake only has to answer `get`. Routing by URL rather than by call order lets
+# one session serve a billing search, which interleaves a role-catalogue read,
+# an account list and a getIamPolicy per account.
+
+PREDEFINED_ROLES_URL = "iam.googleapis.com/v1/roles"
+BILLING_ACCOUNTS_URL = "cloudbilling.googleapis.com/v1/billingAccounts"
+
+
+class FakeResponse:
+    def __init__(self, body: dict, status: int = 200) -> None:
+        self._body, self.status_code, self.ok = body, status, status < 400
+
+    def json(self) -> dict:
+        return self._body
+
+
+class FakeRestSession:
+    """Answers `get` from URL-matched responses; records every call made.
+
+    A route's value may be a list, which is consumed one response per call so
+    pagination can be exercised; the last entry answers any further calls.
+    """
+
+    def __init__(self, routes: dict[str, FakeResponse | list[FakeResponse]]) -> None:
+        self._routes = {
+            pattern: list(value) if isinstance(value, list) else [value]
+            for pattern, value in routes.items()
+        }
+        self.calls: list[tuple[str, dict]] = []
+
+    def get(self, url: str, params: dict | None = None) -> FakeResponse:
+        self.calls.append((url, dict(params or {})))
+        # Longest pattern first, so ".../billingAccounts/X:getIamPolicy" wins
+        # over the ".../billingAccounts" list route it contains.
+        for pattern in sorted(self._routes, key=len, reverse=True):
+            if pattern in url:
+                queue = self._routes[pattern]
+                return queue.pop(0) if len(queue) > 1 else queue[0]
+        raise AssertionError(f"FakeRestSession got an unexpected request: {url}")
+
+    def urls(self) -> list[str]:
+        return [url for url, _ in self.calls]
+
+
+def role_pages(*roles: tuple[str, list[str]]) -> list[FakeResponse]:
+    """Role definitions split across two pages, so pagination is exercised."""
+    raw = [{"name": n, "title": n, "stage": "GA", "includedPermissions": p} for n, p in roles]
+    return [
+        FakeResponse({"roles": raw[:1], "nextPageToken": "next"}),
+        FakeResponse({"roles": raw[1:]}),
+    ]
+
+
+def catalogue(*roles: tuple[str, list[str]], **routes) -> FakeRestSession:
+    """A session serving the predefined catalogue, plus any extra routes."""
+    return FakeRestSession({PREDEFINED_ROLES_URL: role_pages(*roles), **routes})

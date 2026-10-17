@@ -136,12 +136,23 @@ class RiskyRole(BaseModel):
     stage: str | None = Field(default=None, description="Launch stage, e.g. GA or DEPRECATED")
     risk: str = Field(description="Highest risk of any permission the role contains")
     permissions: list[RiskyPermission] = Field(description="The risky permissions it contains")
+    custom: bool = Field(
+        default=False,
+        description="True for a custom role defined on the requested scope, false for predefined",
+    )
 
 
 class RoleList(BaseModel):
     """Roles at or above a risk level."""
 
     min_risk: str = Field(description="Lowest risk level included")
+    scope: str | None = Field(
+        default=None, description="Scope whose custom roles were included, if one was given"
+    )
+    coverage_note: str = Field(
+        default="",
+        description="Which roles this listing could and could not see. Read before trusting it.",
+    )
     count: int = Field(description="Number of roles in `data`")
     suppressed: int = Field(
         default=0,
@@ -159,6 +170,10 @@ class Grant(BaseModel):
 
     resource: str = Field(description="Full resource name the policy is attached to")
     asset_type: str | None = Field(default=None, description="CAI asset type of that resource")
+    display_name: str | None = Field(
+        default=None,
+        description="Human-readable name of the resource, when the source reports one",
+    )
     role: str = Field(description="Role granted")
     member: str = Field(description="Principal, e.g. user:a@example.com or group:ops@example.com")
     member_type: str = Field(description="user, group, serviceAccount, domain, allUsers, ...")
@@ -201,6 +216,43 @@ class GrantList(BaseModel):
         description="Service-agent grants hidden by default; show_all=true includes them",
     )
     suppressed_summary: str = ""
+    coverage_note: str = Field(
+        description="What this search cannot see. Read it before treating the list as complete."
+    )
+    grants: list[Grant]
+    groups: list[GrantGroup] | None = Field(
+        default=None, description="Present when group_by was requested"
+    )
+
+
+class BillingGrantList(BaseModel):
+    """Envelope returned by a billing-account grant search.
+
+    Separate from `GrantList` rather than a `scope="billingAccounts"` variant
+    of it: there is no scope and there are no CAI queries, so every field that
+    would have to be faked is simply absent, and what is specific to billing
+    (which accounts were read, which roles could not be classified) is present.
+    """
+
+    min_risk: str = Field(description="Lowest role risk included")
+    member_types: list[str] = Field(description="Member types searched; empty means all")
+    accounts: list[str] = Field(
+        description="Billing accounts read, by resource name. One getIamPolicy call each."
+    )
+    count: int
+    truncated: bool
+    suppressed: int = Field(
+        default=0,
+        description="Service-agent grants hidden by default; show_all=true includes them",
+    )
+    suppressed_summary: str = ""
+    unclassified_roles: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Roles granted on a billing account whose permissions are not in the predefined "
+            "catalogue, usually custom roles. Reported rather than assumed safe."
+        ),
+    )
     coverage_note: str = Field(
         description="What this search cannot see. Read it before treating the list as complete."
     )

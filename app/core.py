@@ -1,4 +1,4 @@
-"""Cloud Asset Inventory access, plus the IAM role catalogue.
+"""Cloud Asset Inventory access, plus the IAM role catalogue and billing IAM.
 
 The only module that talks to GCP. The CLI and the API are both thin wrappers
 over `search_resources`, so any new capability belongs here rather than in
@@ -26,9 +26,24 @@ from app import role_risk
 from app.aggregate import ATTACHED_IAM_NOTE, attach_iam, fetch_iam_bindings, group_grants
 from app.cache import TTLCache
 from app.config import load_config
-from app.models import Grant, GrantList, Resource, RiskSource, RiskyPermission, RiskyRole, RoleList
+from app.models import (
+    BillingGrantList,
+    Grant,
+    GrantList,
+    Resource,
+    RiskSource,
+    RiskyPermission,
+    RiskyRole,
+    RoleList,
+)
 from app.noise import NoiseFilter
-from app.params import DEFAULT_PAGE_SIZE, SORTABLE_FIELDS, GrantFilters, SearchFilters
+from app.params import (
+    DEFAULT_PAGE_SIZE,
+    SORTABLE_FIELDS,
+    BillingGrantFilters,
+    GrantFilters,
+    SearchFilters,
+)
 from app.query import QueryError, build_query, grant_query
 
 # Friendly names mapped to CAI asset types, loaded from data rather than
@@ -608,7 +623,8 @@ def search_resources(
 
 # --- Role risk -------------------------------------------------------------
 
-IAM_ROLES_URL = "https://iam.googleapis.com/v1/roles"
+IAM_API_URL = "https://iam.googleapis.com/v1"
+IAM_ROLES_URL = f"{IAM_API_URL}/roles"
 
 # The predefined role catalogue: ~2,400 roles, ~10 MB, 3 pages. Cached for a
 # day. This is the ONE cache that is on by default, and deliberately so: it is
@@ -620,15 +636,27 @@ _ROLE_CATALOGUE = TTLCache(ttl_seconds=ROLE_CATALOGUE_TTL)
 
 
 @lru_cache(maxsize=1)
-def get_iam_session():
-    """An authorised HTTP session for the IAM REST API, on the same ADC as CAI."""
+def get_rest_session():
+    """An authorised HTTP session for Google's REST APIs, on the same ADC as CAI.
+
+    Shared by the IAM role catalogue and the Cloud Billing API: both are plain
+    REST, both authenticate from the same credentials, and building one session
+    means one place where the auth scope is decided.
+    """
     from google.auth.transport.requests import AuthorizedSession
 
     credentials, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
     return AuthorizedSession(credentials)
 
 
-def _iam_error(response) -> ResourceExplorerError:
+def _rest_error(response, what: str, service: str, remedy: str = "") -> ResourceExplorerError:
+    """Translate a failed REST response, keeping Google's own message.
+
+    Mirrors `_translate` for the gRPC path, including the SERVICE_DISABLED
+    case: Google returns 403 both for "you lack the role" and for "the API is
+    off on the project this bills to", and the two have different fixes on
+    often-different projects.
+    """
     try:
         error = response.json().get("error", {})
     except ValueError:
@@ -638,10 +666,35 @@ def _iam_error(response) -> ResourceExplorerError:
         if detail.get("reason") == "SERVICE_DISABLED":
             metadata = detail.get("metadata", {})
             return _api_not_enabled(
-                metadata.get("service", "iam.googleapis.com"),
+                metadata.get("service", service),
                 metadata.get("consumer", "your quota project"),
             )
-    return UpstreamError(f"IAM role listing failed: {message}")
+    if response.status_code == 403:
+        return ScopeAccessDenied(f"{what} was denied: {message}{remedy}")
+    if response.status_code == 404:
+        return ScopeNotFound(f"{what} found nothing: {message}")
+    return UpstreamError(f"{what} failed: {message}")
+
+
+def _paginate(
+    session, url: str, params: dict, key: str, what: str, service: str, remedy: str = ""
+) -> list[dict]:
+    """Collect every page of a Google REST list call into one list."""
+    items: list[dict] = []
+    page_token = None
+    while True:
+        page_params = dict(params)
+        if page_token:
+            page_params["pageToken"] = page_token
+        response = session.get(url, params=page_params)
+        if not response.ok:
+            raise _rest_error(response, what, service, remedy)
+        body = response.json()
+        items.extend(body.get(key, []))
+        page_token = body.get("nextPageToken")
+        if not page_token:
+            break
+    return items
 
 
 def fetch_role_catalogue(session=None) -> list[dict]:
@@ -649,24 +702,75 @@ def fetch_role_catalogue(session=None) -> list[dict]:
     if (cached := _ROLE_CATALOGUE.get("predefined")) is not None:
         return cached
 
-    session = session or get_iam_session()
-    roles: list[dict] = []
-    page_token = None
-    while True:
-        params = {"view": "FULL", "pageSize": 1000}
-        if page_token:
-            params["pageToken"] = page_token
-        response = session.get(IAM_ROLES_URL, params=params)
-        if not response.ok:
-            raise _iam_error(response)
-        body = response.json()
-        roles.extend(body.get("roles", []))
-        page_token = body.get("nextPageToken")
-        if not page_token:
-            break
-
+    roles = _paginate(
+        session or get_rest_session(),
+        IAM_ROLES_URL,
+        {"view": "FULL", "pageSize": 1000},
+        key="roles",
+        what="IAM role listing",
+        service="iam.googleapis.com",
+    )
     _ROLE_CATALOGUE.put("predefined", roles)
     return roles
+
+
+# IAM supports custom roles on an organization and on a project, and nowhere
+# else -- notably NOT on a folder. A folder scope is therefore rejected rather
+# than answered with predefined roles only, which would read as "this folder
+# has no risky custom roles" when the question was never asked.
+CUSTOM_ROLE_LEVELS = ("organizations", "projects")
+
+
+def validate_role_scope(scope: str) -> str:
+    validate_scope(scope)
+    level = scope.split("/", 1)[0]
+    if level not in CUSTOM_ROLE_LEVELS:
+        raise InvalidFilterError(
+            f"Custom roles cannot be defined on a folder, so {scope} has none to list. "
+            "Pass the organization, or a project, instead."
+        )
+    return scope
+
+
+def fetch_custom_roles(scope: str, session=None) -> list[dict]:
+    """Custom roles defined ON `scope` itself, with their permissions.
+
+    Deliberately uncached, unlike the predefined catalogue: these are the
+    customer's own definitions, edited by the customer, so a day-old copy
+    could hide exactly the change someone is verifying. Deleted roles are
+    excluded -- `showDeleted` is left off.
+    """
+    return _paginate(
+        session or get_rest_session(),
+        f"{IAM_API_URL}/{scope}/roles",
+        {"view": "FULL", "pageSize": 1000},
+        key="roles",
+        what=f"Custom role listing on {scope}",
+        service="iam.googleapis.com",
+    )
+
+
+def _roles_coverage_note(scope: str | None) -> str:
+    """Which roles the listing could see. Stated on every response."""
+    if scope is None:
+        return (
+            "Predefined roles only. Custom roles are not listed; pass a scope (an "
+            "organization or a project) to include the custom roles defined on it. "
+            "`gcpe grants` matches custom roles either way, because it matches on "
+            "permissions rather than on names."
+        )
+    if scope.startswith("organizations/"):
+        return (
+            f"Predefined roles, plus the custom roles defined on {scope}. Custom roles "
+            "defined inside the projects beneath it are NOT listed: that would take one "
+            "call per project, which this tool does not do. Pass a project scope to list "
+            "its own."
+        )
+    return (
+        f"Predefined roles, plus the custom roles defined on {scope}. Custom roles defined "
+        "on its organization are not listed here, though they can be granted here; pass "
+        "the organization to list those."
+    )
 
 
 def _parse_min_risk(value: str) -> role_risk.Risk:
@@ -685,20 +789,39 @@ def _risky_permission(rule: role_risk.RiskRule) -> RiskyPermission:
     )
 
 
-def list_risky_roles(min_risk: str = "high", show_all: bool = False, session=None) -> RoleList:
-    """Predefined roles containing at least one permission at or above `min_risk`.
+def list_risky_roles(
+    min_risk: str = "high",
+    show_all: bool = False,
+    scope: str | None = None,
+    session=None,
+) -> RoleList:
+    """Roles containing at least one permission at or above `min_risk`.
+
+    Predefined roles always; the custom roles defined on `scope` as well when
+    one is given. Both are classified by the same rules against the same
+    permissions, so a custom role is judged on what it can do rather than on
+    the fact that someone wrote it locally.
 
     Service-agent roles are hidden unless `show_all`, and always counted: they
     are granted by Google, not by the customer, and are most of the matches.
+    The rule is not applied to custom roles -- a customer-written role named
+    `...serviceAgent` is still the customer's to review.
     """
     minimum = _parse_min_risk(min_risk)
+    if scope is not None:
+        validate_role_scope(scope)
+
+    candidates = [(raw, False) for raw in fetch_role_catalogue(session)]
+    if scope is not None:
+        candidates += [(raw, True) for raw in fetch_custom_roles(scope, session)]
+
     roles: list[RiskyRole] = []
     hidden = 0
-    for raw in fetch_role_catalogue(session):
+    for raw, custom in candidates:
         matched = role_risk.classify(raw.get("includedPermissions", []), minimum)
         if not matched:
             continue
-        if not show_all and role_risk.is_service_agent_role(raw["name"]):
+        if not show_all and not custom and role_risk.is_service_agent_role(raw["name"]):
             hidden += 1
             continue
         roles.append(
@@ -708,6 +831,7 @@ def list_risky_roles(min_risk: str = "high", show_all: bool = False, session=Non
                 stage=raw.get("stage"),
                 risk=role_risk.highest(matched).value,
                 permissions=[_risky_permission(r) for r in matched],
+                custom=custom,
             )
         )
 
@@ -716,6 +840,8 @@ def list_risky_roles(min_risk: str = "high", show_all: bool = False, session=Non
     sources = role_risk.load_sources()
     return RoleList(
         min_risk=minimum.value,
+        scope=scope,
+        coverage_note=_roles_coverage_note(scope),
         count=len(roles),
         suppressed=hidden,
         suppressed_summary=(
@@ -748,8 +874,23 @@ def _coverage_note(scope: str) -> str:
     }[kind]
     return (
         f"{above} Billing account IAM is not indexed by Cloud Asset Inventory and is not "
-        "included. Group membership is not expanded: a group grant applies to every member."
+        "included here; run `gcpe billing-grants` (GET /v1/billing-grants) for it. Group "
+        "membership is not expanded: a group grant applies to every member."
     )
+
+
+def _validate_grant_filters(
+    min_risk: str, member_types: Sequence[str], group_by: str | None
+) -> tuple[role_risk.Risk, list[str]]:
+    """Validate what the two grant searches share. Both reject, neither ignores."""
+    minimum = _parse_min_risk(min_risk)
+    try:
+        types = role_risk.validate_member_types(member_types)
+    except role_risk.RiskRuleError as exc:
+        raise InvalidFilterError(str(exc)) from exc
+    if group_by not in (None, "member", "role"):
+        raise InvalidFilterError(f"Cannot group by {group_by!r}. Choose from: member, role.")
+    return minimum, types
 
 
 def search_grants(
@@ -764,15 +905,9 @@ def search_grants(
     are hidden client-side because IAM policy search has no negation.
     """
     validate_scope(filters.scope)
-    minimum = _parse_min_risk(filters.min_risk)
-    try:
-        member_types = role_risk.validate_member_types(filters.member_types)
-    except role_risk.RiskRuleError as exc:
-        raise InvalidFilterError(str(exc)) from exc
-    if filters.group_by not in (None, "member", "role"):
-        raise InvalidFilterError(
-            f"Cannot group by {filters.group_by!r}. Choose from: member, role."
-        )
+    minimum, member_types = _validate_grant_filters(
+        filters.min_risk, filters.member_types, filters.group_by
+    )
 
     rules = {r.permission: r for r in role_risk.rules_at_least(minimum)}
     batches = role_risk.permission_batches(list(rules), len(member_types))
@@ -845,6 +980,157 @@ def search_grants(
             else ""
         ),
         coverage_note=_coverage_note(filters.scope),
+        grants=grants,
+        groups=group_grants(grants, filters.group_by) if filters.group_by else None,
+    )
+
+
+# --- Billing account IAM ----------------------------------------------------
+#
+# Billing accounts are the one place a maximally dangerous role lives that
+# `gcpe grants` cannot reach: Cloud Asset Inventory does not index them, and
+# `billingAccounts/...` is not a valid CAI scope (verified: "Invalid scope").
+# Billing Account Administrator can move an account, change who pays, and
+# close billing on every project attached to it -- one of the two motivating
+# examples for this phase -- so leaving it out would leave the obvious hole.
+#
+# The Cloud Billing API is the route, and it is bounded: one list call, then
+# one getIamPolicy per account a caller can see. That is a handful of calls,
+# not a per-project walk, so it does not run into what the PRD rejects.
+
+BILLING_API_URL = "https://cloudbilling.googleapis.com/v1"
+BILLING_SERVICE = "cloudbilling.googleapis.com"
+BILLING_ASSET_TYPE = "cloudbilling.googleapis.com/BillingAccount"
+
+BILLING_COVERAGE_NOTE = (
+    "Every billing account this caller can see. Billing accounts are not under an "
+    "organization in the IAM hierarchy, so no scope bounds them and this may be more, or "
+    "fewer, accounts than the organization you searched for resources. Roles are classified "
+    "from the predefined catalogue; a role that is not in it is reported in "
+    "`unclassified_roles` rather than assumed safe. Group membership is not expanded: a "
+    "group grant applies to every member."
+)
+
+_BILLING_REMEDY = (
+    ". Listing billing accounts and reading their IAM needs roles/billing.viewer (or "
+    "Billing Account Viewer on each account), and cloudbilling.googleapis.com enabled on "
+    "the project this request bills to."
+)
+
+
+def list_billing_accounts(session=None) -> list[dict]:
+    """Every billing account the caller can see, newest API page order preserved."""
+    return _paginate(
+        session or get_rest_session(),
+        f"{BILLING_API_URL}/billingAccounts",
+        {"pageSize": 100},
+        key="billingAccounts",
+        what="Billing account listing",
+        service=BILLING_SERVICE,
+        remedy=_BILLING_REMEDY,
+    )
+
+
+def billing_account_policy(name: str, session=None) -> dict:
+    """The IAM policy attached to one billing account (`billingAccounts/XXXXXX-...`)."""
+    session = session or get_rest_session()
+    response = session.get(f"{BILLING_API_URL}/{name}:getIamPolicy")
+    if not response.ok:
+        raise _rest_error(
+            response, f"Reading IAM on {name}", BILLING_SERVICE, remedy=_BILLING_REMEDY
+        )
+    return response.json()
+
+
+def _catalogue_permissions(session=None) -> dict[str, set[str]]:
+    """Role name -> the permissions it contains, from the predefined catalogue.
+
+    The billing path needs this because the Cloud Billing API returns role
+    names only. CAI does the equivalent server-side for `gcpe grants`, which
+    is why that path never needs the catalogue.
+    """
+    return {
+        raw["name"]: set(raw.get("includedPermissions", []))
+        for raw in fetch_role_catalogue(session)
+    }
+
+
+def search_billing_grants(filters: BillingGrantFilters, session=None) -> BillingGrantList:
+    """Principals holding roles at or above `filters.min_risk` on a billing account.
+
+    The same rules as `search_grants`, evaluated locally rather than by CAI:
+    the Cloud Billing API reports role names, so risk comes from looking each
+    role up in the predefined catalogue. A role that is not there -- a custom
+    role granted on the account -- is counted and named, never dropped.
+    """
+    minimum, member_types = _validate_grant_filters(
+        filters.min_risk, filters.member_types, filters.group_by
+    )
+    rules = {r.permission: r for r in role_risk.rules_at_least(minimum)}
+
+    session = session or get_rest_session()
+    accounts = list_billing_accounts(session)
+    permissions_by_role = _catalogue_permissions(session) if accounts else {}
+
+    found: list[Grant] = []
+    hidden = 0
+    unclassified: set[str] = set()
+    for account in accounts:
+        name = account["name"]
+        policy = billing_account_policy(name, session)
+        for binding in policy.get("bindings", []):
+            role = binding.get("role", "")
+            held = permissions_by_role.get(role)
+            if held is None:
+                unclassified.add(role)
+                continue
+            matched = sorted(held & set(rules))
+            if not matched:
+                continue
+            risk = role_risk.highest(rules[p] for p in matched)
+            condition = (binding.get("condition") or {}).get("expression") or None
+            for member in binding.get("members", []):
+                kind = role_risk.member_type(member)
+                if member_types and kind not in member_types:
+                    continue
+                if not filters.show_all and role_risk.is_service_agent_grant(member, role):
+                    hidden += 1
+                    continue
+                found.append(
+                    Grant(
+                        resource=f"//{BILLING_SERVICE}/{name}",
+                        asset_type=BILLING_ASSET_TYPE,
+                        display_name=account.get("displayName"),
+                        role=role,
+                        member=member,
+                        member_type=kind,
+                        risk=risk.value,
+                        matched_permissions=matched,
+                        condition=condition,
+                    )
+                )
+
+    grants = sorted(
+        found, key=lambda g: (-role_risk.Risk(g.risk).rank, g.member, g.role, g.resource)
+    )
+    truncated = filters.limit is not None and len(grants) > filters.limit
+    if truncated:
+        grants = grants[: filters.limit]
+
+    return BillingGrantList(
+        min_risk=minimum.value,
+        member_types=member_types,
+        accounts=[a["name"] for a in accounts],
+        count=len(grants),
+        truncated=truncated,
+        suppressed=hidden,
+        suppressed_summary=(
+            f"{hidden} grant(s) to Google service agents hidden. Use --show-all to include them."
+            if hidden
+            else ""
+        ),
+        unclassified_roles=sorted(unclassified),
+        coverage_note=BILLING_COVERAGE_NOTE,
         grants=grants,
         groups=group_grants(grants, filters.group_by) if filters.group_by else None,
     )

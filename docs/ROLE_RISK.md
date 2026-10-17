@@ -1,7 +1,7 @@
 # Role risk: how roles are classified, and the evidence
 
-`gcpe roles` / `GET /v1/roles` and `gcpe grants` / `GET /v1/grants` classify IAM roles by
-risk. This page lists every rule and the published source behind it, quoted, so you can check
+`gcpe roles` / `GET /v1/roles`, `gcpe grants` / `GET /v1/grants` and `gcpe billing-grants` /
+`GET /v1/billing-grants` classify IAM roles by risk. This page lists every rule and the published source behind it, quoted, so you can check
 the classification rather than take it on trust.
 
 The rules live in [`app/role_risk_rules.json`](../app/role_risk_rules.json). A test checks that
@@ -11,15 +11,28 @@ every rule.
 ## How risk is decided
 
 **Risk comes from permissions, not role names.** A role's risk is the highest risk of any
-permission it contains. Both commands use the same rules:
+permission it contains. All three commands use the same rules:
 
-- `roles` checks them against the IAM API's catalogue of predefined roles (about 2,400 roles).
+- `roles` checks them against the IAM API's catalogue of predefined roles (about 2,400 roles),
+  plus the custom roles defined on `--scope` when one is given.
 - `grants` compiles the same permissions into a Cloud Asset Inventory query
   (`policy.role.permissions:`), so CAI does the matching across the whole scope.
+- `billing-grants` resolves each role's permissions from the catalogue, because the Cloud
+  Billing API reports role names and nothing else.
 
-So the two cannot disagree, and roles nobody listed are still covered. That includes **custom
-roles** and obscure predefined ones. For example, `roles/firebase.managementServiceAgent`
-contains `resourcemanager.projects.setIamPolicy`.
+So the three cannot disagree, and roles nobody listed are still covered. That includes
+**custom roles** and obscure predefined ones. For example,
+`roles/firebase.managementServiceAgent` contains `resourcemanager.projects.setIamPolicy`.
+
+Two limits worth knowing, both of which the responses state:
+
+- `grants` matches custom roles anywhere in the scope, since the match is on permissions.
+  `roles` can only *list* them for one organization or project at a time, because listing
+  takes a call per scope. An organization scope does not reach the custom roles defined
+  inside its projects.
+- `billing-grants` cannot classify a role that is not in the predefined catalogue — a custom
+  role granted on a billing account. Those are reported in `unclassified_roles` for manual
+  review rather than assumed safe.
 
 | Level | Meaning |
 |:---|:---|

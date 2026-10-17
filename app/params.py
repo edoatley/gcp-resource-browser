@@ -83,6 +83,10 @@ class Help:
         "allUsers, allAuthenticatedUsers, principal, principalSet. Omit for all."
     )
     GROUP_BY = "Roll grants up by `member` (who holds what) or `role` (who holds each role)"
+    ROLE_SCOPE = (
+        "Also list the custom roles defined on this organization or project. Custom roles "
+        "cannot be defined on a folder. Omit to list predefined roles only."
+    )
     SHOW_ALL_AGENTS = "Include Google-managed service agents, hidden by default"
     SHOW_ALL = (
         "Include resources hidden by default (enabled API services, image layers, "
@@ -118,6 +122,23 @@ class GrantFilters:
     """A search for principals holding risky roles."""
 
     scope: str
+    min_risk: str = "high"
+    member_types: Sequence[str] = field(default_factory=tuple)
+    show_all: bool = False
+    limit: int | None = DEFAULT_LIMIT
+    group_by: str | None = None
+
+
+@dataclass(frozen=True)
+class BillingGrantFilters:
+    """A search for principals holding risky roles on billing accounts.
+
+    No scope: billing accounts sit outside the resource hierarchy, so the set
+    searched is "every account this caller can see" rather than "everything
+    under X". Keeping that out of the type stops a caller passing a scope and
+    believing it bounded the answer.
+    """
+
     min_risk: str = "high"
     member_types: Sequence[str] = field(default_factory=tuple)
     show_all: bool = False

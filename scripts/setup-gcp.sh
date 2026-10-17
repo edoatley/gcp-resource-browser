@@ -41,9 +41,12 @@ fi
 say "APIs"
 # cloudasset: what the tool calls. iamcredentials: needed to impersonate the SA.
 # iam: the predefined role catalogue behind `gcpe roles` / GET /v1/roles. Listing
-# predefined roles needs no extra IAM role, only the API on the quota project.
+# predefined roles needs no extra IAM role, only the API on the quota project;
+# listing CUSTOM roles additionally needs iam.roles.list on the scope.
+# cloudbilling: `gcpe billing-grants` / GET /v1/billing-grants. Billing account
+# IAM is not in Cloud Asset Inventory, so it has to be read from its own API.
 gcloud services enable cloudasset.googleapis.com iamcredentials.googleapis.com \
-  iam.googleapis.com --project="$PROJECT_ID"
+  iam.googleapis.com cloudbilling.googleapis.com --project="$PROJECT_ID"
 
 say "Service account $SA_EMAIL"
 if gcloud iam service-accounts describe "$SA_EMAIL" --project="$PROJECT_ID" >/dev/null 2>&1; then
@@ -70,6 +73,32 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --role="roles/serviceusage.serviceUsageConsumer" \
   --condition=None >/dev/null
 echo "  serviceUsageConsumer on $PROJECT_ID"
+
+# Custom roles and billing accounts, for `gcpe roles --scope` and
+# `gcpe billing-grants`. Both are optional capabilities, so a failure here is
+# reported and skipped rather than fatal -- plenty of estates have neither.
+if [[ -n "${ORGANIZATION_ID:-}" ]]; then
+  if gcloud organizations add-iam-policy-binding "$ORGANIZATION_ID" \
+      --member="serviceAccount:${SA_EMAIL}" \
+      --role="roles/iam.roleViewer" \
+      --condition=None >/dev/null 2>&1; then
+    printf '  iam.roleViewer on organizations/%s (custom roles)\n' "$ORGANIZATION_ID"
+  else
+    printf '  SKIPPED iam.roleViewer on organizations/%s (no access)\n' "$ORGANIZATION_ID" >&2
+  fi
+else
+  echo "  set ORGANIZATION_ID to grant iam.roleViewer for 'gcpe roles --scope'"
+fi
+
+for account in $(gcloud billing accounts list --format='value(name)' 2>/dev/null); do
+  if gcloud billing accounts add-iam-policy-binding "$account" \
+      --member="serviceAccount:${SA_EMAIL}" \
+      --role="roles/billing.viewer" >/dev/null 2>&1; then
+    printf '  billing.viewer on %s\n' "$account"
+  else
+    printf '  SKIPPED billing.viewer on %s (no access)\n' "$account" >&2
+  fi
+done
 
 for project in "${TARGET_PROJECTS[@]}"; do
   if gcloud projects add-iam-policy-binding "$project" \

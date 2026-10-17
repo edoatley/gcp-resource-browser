@@ -9,6 +9,12 @@ except `setup-gcp.sh`.
 | `compare-resources.sh` | Diff the tool's results against `gcloud` for the same filters; exits non-zero if they differ |
 | `gcloud-search-resources.sh` | Independent `gcloud` implementation of `search`, emitting normalised JSON lines |
 | `explorer-search-resources.sh` | The tool's own results in the same normalised form (implemented in `_explorer_search.py`) |
+| `compare-grants.sh` | Diff `gcpe grants --show-all` against gcloud. The gcloud side runs one search per permission, independent of the tool's batching. |
+| `gcloud-search-grants.sh` / `_explorer_grants.py` | The two sides of `compare-grants.sh`, as sorted `resource<TAB>role<TAB>member` lines |
+| `compare-roles.sh` | Diff `gcpe roles` against an independent jq classification of the same rules |
+| `gcloud-list-roles.sh` / `_explorer_roles.py` | The two sides of `compare-roles.sh`, as sorted `risk<TAB>role` lines |
+| `compare-billing-grants.sh` | Diff `gcpe billing-grants --show-all` against gcloud's reading of the Cloud Billing API |
+| `gcloud-billing-grants.sh` / `_explorer_billing_grants.py` | The two sides of `compare-billing-grants.sh`, as sorted `resource<TAB>role<TAB>member` lines |
 | `check-noise.sh` | Checks that the noise-suppressed result is a strict subset of the full result |
 | `benchmark.py` | Records a latency baseline for the delivery plan |
 
@@ -24,7 +30,9 @@ filters, where a slightly wrong query string is easy to miss.
 
 ## Usage
 
-All of these need ADC and Cloud Asset Viewer on the scope.
+All of these need ADC and Cloud Asset Viewer on the scope. `compare-roles.sh --scope` also
+needs `iam.roles.list` there (`roles/iam.roleViewer`), and `compare-billing-grants.sh` needs
+`roles/billing.viewer` plus `cloudbilling.googleapis.com` on the quota project.
 
 ```bash
 # Differential check. Takes --scope, --type, --term, --label, --location (all but --scope repeatable or optional)
@@ -37,6 +45,20 @@ All of these need ADC and Cloud Asset Viewer on the scope.
 ./scripts/gcloud-search-resources.sh --scope projects/my-project --type bucket
 ./scripts/explorer-search-resources.sh --scope projects/my-project --type bucket
 
+# Risky grants: tool vs gcloud
+./scripts/compare-grants.sh --scope projects/my-project
+./scripts/compare-grants.sh --scope organizations/123 --role-risk medium --member-type user --member-type group
+
+# Risky roles: the tool's classifier vs an independent jq one over the same rules.
+# --scope adds the custom roles defined on an organization or project.
+./scripts/compare-roles.sh
+./scripts/compare-roles.sh --risk medium --scope projects/my-project
+
+# Billing account IAM. Needs roles/billing.viewer; takes no scope, because
+# billing accounts are not under an organization.
+./scripts/compare-billing-grants.sh
+./scripts/compare-billing-grants.sh --role-risk medium --member-type user
+
 # Noise reduction may only remove rows, never add or alter them
 ./scripts/check-noise.sh projects/my-project
 
@@ -44,10 +66,16 @@ All of these need ADC and Cloud Asset Viewer on the scope.
 uv run python -m scripts.benchmark --scope organizations/123456789 --repeats 3 --limit 1000
 ```
 
-`setup-gcp.sh` reads `PROJECT_ID` (default `gcp-resource-browser-eo`) and `SA_NAME` (default
-`resource-browser`) from the environment. Edit `TARGET_PROJECTS` in the script to list the
+`setup-gcp.sh` reads `PROJECT_ID` (default `gcp-resource-browser-eo`), `SA_NAME` (default
+`resource-browser`) and optionally `ORGANIZATION_ID` (to grant `roles/iam.roleViewer`, for
+`gcpe roles --scope`) from the environment. Edit `TARGET_PROJECTS` in the script to list the
 projects to grant on, and re-run it after adding one, since it is idempotent.
 
 ## Not yet covered
 
 The differential scripts do not yet cover `--project`, `--raw-query` or `--sort`.
+
+`gcloud-list-roles.sh` calls the IAM REST API with `curl` rather than `gcloud iam roles list`,
+because that command cannot ask for the `FULL` view and so never returns `includedPermissions`
+— without which there is nothing to classify. `gcloud auth print-access-token` still provides
+the credentials, and the classification, which is the part under test, is entirely jq's.

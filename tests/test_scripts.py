@@ -84,3 +84,89 @@ def test_reports_errors_without_traceback(use_fake, monkeypatch, capsys) -> None
 
     assert _explorer_search.main() == 1
     assert "explorer error" in capsys.readouterr().err
+
+
+def test_grants_helper_emits_sorted_tsv_with_agents_included(use_fake, monkeypatch, capsys) -> None:
+    """Agents must be included: gcloud cannot tell them apart, so both sides compare everything."""
+    from scripts import _explorer_grants
+    from tests.conftest import make_iam_result
+
+    owner = ["resourcemanager.projects.setIamPolicy"]
+    agent = "serviceAccount:service-1@gcp-sa-run.iam.gserviceaccount.com"
+    use_fake(
+        FakeAssetClient(
+            iam_policies=[
+                make_iam_result(
+                    resource="//r",
+                    role="roles/owner",
+                    members=("user:b@x.com", agent),
+                    matched={"roles/owner": owner},
+                )
+            ]
+        )
+    )
+    monkeypatch.setattr("sys.argv", ["_explorer_grants", "--scope", "projects/p"])
+
+    assert _explorer_grants.main() == 0
+
+    assert capsys.readouterr().out.splitlines() == [
+        f"//r\troles/owner\t{agent}",
+        "//r\troles/owner\tuser:b@x.com",
+    ]
+
+
+def test_roles_helper_emits_sorted_tsv_with_agent_roles_included(monkeypatch, capsys) -> None:
+    """Agent roles must be included: the gcloud side classifies the whole catalogue."""
+    from scripts import _explorer_roles
+    from tests.conftest import catalogue
+
+    core._ROLE_CATALOGUE.clear()
+    owner = ["resourcemanager.projects.setIamPolicy"]
+    monkeypatch.setattr(
+        core,
+        "get_rest_session",
+        lambda: catalogue(("roles/run.serviceAgent", owner), ("roles/owner", owner)),
+    )
+    monkeypatch.setattr("sys.argv", ["_explorer_roles", "--risk", "high"])
+
+    assert _explorer_roles.main() == 0
+
+    assert capsys.readouterr().out.splitlines() == [
+        "high\troles/owner",
+        "high\troles/run.serviceAgent",
+    ]
+    core._ROLE_CATALOGUE.clear()
+
+
+def test_billing_helper_emits_sorted_tsv_and_warns_about_unclassified(monkeypatch, capsys) -> None:
+    from scripts import _explorer_billing_grants
+    from tests.conftest import BILLING_ACCOUNTS_URL, FakeResponse, catalogue
+
+    core._ROLE_CATALOGUE.clear()
+    account = "billingAccounts/01AAAA-BBBBBB-CCCCCC"
+    agent = "serviceAccount:service-1@gcp-sa-billing.iam.gserviceaccount.com"
+    session = catalogue(
+        ("roles/billing.admin", ["billing.accounts.setIamPolicy"]),
+        ("roles/billing.viewer", []),
+        **{
+            BILLING_ACCOUNTS_URL: FakeResponse({"billingAccounts": [{"name": account}]}),
+            f"{account}:getIamPolicy": FakeResponse(
+                {
+                    "bindings": [
+                        {"role": "roles/billing.admin", "members": ["user:a@x.com", agent]},
+                        {"role": "organizations/1/roles/odd", "members": ["user:b@x.com"]},
+                    ]
+                }
+            ),
+        },
+    )
+    monkeypatch.setattr(core, "get_rest_session", lambda: session)
+    monkeypatch.setattr("sys.argv", ["_explorer_billing_grants"])
+
+    assert _explorer_billing_grants.main() == 0
+
+    captured = capsys.readouterr()
+    prefix = f"//cloudbilling.googleapis.com/{account}\troles/billing.admin"
+    assert captured.out.splitlines() == [f"{prefix}\t{agent}", f"{prefix}\tuser:a@x.com"]
+    assert "organizations/1/roles/odd" in captured.err
+    core._ROLE_CATALOGUE.clear()

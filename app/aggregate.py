@@ -16,7 +16,7 @@ from collections import Counter, defaultdict
 
 from google.cloud import asset_v1
 
-from app.models import IamBinding, Resource, Summary
+from app.models import Grant, GrantGroup, IamBinding, Resource, Summary
 
 # Stated on every response carrying IAM, because "who can access this bucket"
 # is exactly what a reader will assume, and attached-only bindings do not
@@ -85,3 +85,33 @@ def summarise(scope: str, resources: list[Resource], suppressed: int) -> Summary
         by_project=ranked(Counter(r.project_id or r.project or "<unknown>" for r in resources)),
         by_location=ranked(Counter(r.location or "<none>" for r in resources)),
     )
+
+
+_RISK_RANK = {"medium": 1, "high": 2}
+
+
+def group_grants(grants: list[Grant], by: str) -> list[GrantGroup]:
+    """Roll grants up for an over-permissioning review.
+
+    By member: everything risky each principal holds. By role: who holds each
+    risky role. Ordered by highest risk, then by how many grants, so the
+    broadest access is read first.
+    """
+    buckets: dict[str, list[Grant]] = defaultdict(list)
+    for grant in grants:
+        buckets[grant.member if by == "member" else grant.role].append(grant)
+
+    groups = []
+    for key, items in buckets.items():
+        highest_risk = max((g.risk for g in items), key=_RISK_RANK.__getitem__)
+        groups.append(
+            GrantGroup(
+                key=key,
+                highest_risk=highest_risk,
+                grant_count=len(items),
+                resource_count=len({g.resource for g in items}),
+                roles=sorted({g.role for g in items}) if by == "member" else None,
+                members=sorted({g.member for g in items}) if by == "role" else None,
+            )
+        )
+    return sorted(groups, key=lambda g: (-_RISK_RANK[g.highest_risk], -g.grant_count, g.key))

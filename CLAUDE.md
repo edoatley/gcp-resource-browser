@@ -88,6 +88,11 @@ the user runs `gcloud auth application-default login` first. This is a deliberat
 - `app/config.py` — site overrides for the asset-type mapping and noise rules.
 - `app/aggregate.py` — IAM join and the summary rollup.
 - `app/output.py` — JSON/CSV emitters for the CLI.
+- `app/role_risk.py` + `app/role_risk_rules.json` — which permissions make a role high/medium
+  risk. Every rule cites a quoted source; `docs/ROLE_RISK.md` must list every rule and source
+  (a test enforces it). Change a rule only with a source.
+- `app/core.py` billing section — `search_billing_grants`, the only path that does not go
+  through CAI.
 - `app/gcloud.py` — renders a search as its `gcloud` equivalent for `--show-gcloud`. It reuses
   the tool's compiled query, so it is a convenience and **not** a correctness check; that stays
   with the independent `scripts/gcloud-search-resources.sh`. Pin exact strings in tests.
@@ -99,7 +104,7 @@ the user runs `gcloud auth application-default login` first. This is a deliberat
   by `scripts/gcloud-search-resources.sh`.
 - `app/models.py` — `Resource`, `ResourceList`, `ErrorResponse`.
 - `app/api.py` — FastAPI. `GET /v1/resources` (repeatable `type`, `label`, `location`,
-  `project`), `GET /v1/types`.
+  `project`), `GET /v1/types`, `GET /v1/roles`, `GET /v1/grants`, `GET /v1/billing-grants`.
 - `app/cli.py` — Typer + `rich`. `serve` runs uvicorn against the same FastAPI app, so CLI and
   API are one process and one deployable.
 - `app/main.py` — thin entry shim for `python -m app.main`.
@@ -139,8 +144,15 @@ adding a resource type is a one-line change that lights up both surfaces.
 
 ## Not yet built
 
-Phases 0–3, 5 and 6 are built. Still open: Phase 4's baseline measured on a real organisation,
-effective (inherited) IAM, and the deliberately conditional Phase 7. **Check
+Phases 0–3, 5, 6 and most of 8 are built. Still open: Phase 4's baseline measured on a real
+organisation, effective (inherited) IAM, Phase 8's group expansion, and the deliberately
+conditional Phase 7, and Phase 9 (`gcpe docs`). Deferred items that are not whole phases live
+in `docs/todo/`, one self-contained handoff each — check there before designing something that
+may already be specified. **`gcpe roles --scope` (custom-role listing) is built but unproven**: the
+dev estate has no custom roles and no organization, so `scripts/compare-roles.sh --scope` has
+only ever run on the empty case. If `view=FULL` does not return `includedPermissions` for
+custom roles, the classifier would report one as safe — don't tick that box without a run
+against a scope that actually has one. **Check
 `docs/DELIVERY_PLAN.md` before assuming a missing feature is out of scope** — it phases this work and records the sequencing rationale. Keep its checkboxes
 current as phases land, and keep the status note near the top of `README.md` in step.
 
@@ -171,6 +183,37 @@ or one filter's results will be served for another.
 Unknown fields are rejected, never dropped — a silently ignored sort gives plausible output in
 the wrong order. Note `assetType` is sortable but not queryable, which is why noise reduction
 still cannot move upstream.
+
+**Role risk is defined by permissions, never by role names.** `/v1/roles`, `/v1/grants` and
+`/v1/billing-grants` share `role_risk_rules.json`; do not add a role-name list beside it, or
+the three endpoints can disagree. `search_grants` batches permissions because CAI rejects more than 32 alternations
+per query (product of permissions × member types, verified live). IAM policy search has no
+negation, so service agents are hidden client-side with the noise invariants (counted, and
+`show_all` shows them). Every grant response carries `coverage_note`; keep it. The **predefined** IAM role
+catalogue is cached 24 h by default — the deliberate exception to "cache off", because it is
+Google's reference data, not estate data. Don't extend that exception to search results, nor
+to custom roles: those are the customer's own definitions and are re-read every call.
+
+**Billing account IAM is a separate command on a separate API, and must stay that way.** CAI
+does not index billing accounts and `billingAccounts/…` is not a valid CAI scope (verified
+live), so `search_grants` cannot reach them at any scope. `search_billing_grants` reads the
+Cloud Billing API — one `billingAccounts.list`, then one `getIamPolicy` per account — and
+takes no scope, because billing accounts are not under an organization in the IAM hierarchy;
+giving it one would imply a bound that does not exist. That API returns role names with no
+`matched_permissions`, so risk is resolved against the catalogue locally and a role missing
+from it goes into `unclassified_roles` rather than being dropped.
+
+**Custom roles exist only on organizations and projects, never on folders.** `list_risky_roles`
+rejects a folder scope instead of answering with predefined roles alone, which would read as
+"no risky custom roles here" when the question was never asked. An org scope lists the custom
+roles defined *on the org*, not those inside its projects — that would be the per-project walk
+the PRD forbids. `/v1/grants` matches custom roles at every level regardless, because it
+matches on permissions.
+
+**IAM and Cloud Billing are plain REST behind `core.get_rest_session()`**, not generated
+clients. Add another Google REST API through that session and `_paginate`, and translate
+failures with `_rest_error` so `SERVICE_DISABLED` stays distinguished from a real 403 — pass a
+`remedy` naming the role and API needed.
 
 **IAM is attached-only, and must keep saying so.** `iam_note` on every IAM-bearing response
 states that inherited grants are excluded; presenting attached bindings as effective access is

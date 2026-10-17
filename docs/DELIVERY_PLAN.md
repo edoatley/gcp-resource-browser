@@ -510,6 +510,163 @@ entirely.
 
 ---
 
+## Phase 8 — High-risk roles and grants ◐
+
+**Goal:** see which IAM roles are high risk, and who holds them, across a project or an
+organization — to review over-permissioning. Organization Administrator and Billing Account
+Administrator were the motivating examples.
+
+- ☑ `GET /v1/roles?risk=high` / `gcpe roles --risk high` — roles classed as risky, each with
+  the permissions that make it so.
+- ☑ `GET /v1/grants?role_risk=high&member_type=user&member_type=group&group_by=member` /
+  `gcpe grants SCOPE …` — who holds those roles, flat or rolled up by member or role.
+- ☑ Rules in `app/role_risk_rules.json`, each citing quoted sources; evidence in
+  [ROLE_RISK.md](ROLE_RISK.md). Site-overridable via `role_risk_rules`.
+- ☑ `--show-gcloud`, an independent `scripts/gcloud-search-grants.sh`, and
+  `scripts/compare-grants.sh` — matching on all three real-estate checks run.
+- ☑ **Billing account IAM** via the Cloud Billing API (`billingAccounts.list` +
+  `getIamPolicy`): a small, bounded set of calls. `GET /v1/billing-grants` /
+  `gcpe billing-grants`, with `scripts/compare-billing-grants.sh` — matching on all three
+  real-estate checks run (high, medium, and `--member-type user`). Needs `roles/billing.viewer`
+  and `cloudbilling.googleapis.com` on the quota project.
+- ◐ **Custom roles in `/v1/roles`.** `?scope=` / `gcpe roles --scope` lists the custom roles
+  defined on an organization or project alongside the predefined catalogue, classified by the
+  same rules and marked `custom`. `scripts/compare-roles.sh` reclassifies with jq and matches
+  on the predefined catalogue (95 roles at high, 117 at medium). **The custom-role path itself
+  is still unproven** — see below.
+- ☐ **Group expansion** via the Cloud Identity Groups API — written up as a pickup-ready
+  item in [`docs/todo/group-expansion-cloud-identity.md`](todo/group-expansion-cloud-identity.md).
+  Deliberately left: it needs a new API enabled, `roles/cloudidentity.groups.readonly` (a
+  Cloud Identity directory role, not a GCP one), and a transitive-membership call per distinct
+  group in the results, so it needs bounding the way fan-out is bounded. It is also the one
+  Phase 8 item this estate cannot verify at all — no organization means no GCP-visible groups.
+  Until it lands, every IAM-bearing response says group membership is not expanded.
+
+### What the live checks settled
+
+Run against the dev estate (7 projects, 2 billing accounts, **no organization and no custom
+roles anywhere**):
+
+| Check | Result |
+|:---|:---|
+| `compare-roles.sh --risk high` | MATCH, 95 roles (35 predefined + 60 service-agent) |
+| `compare-roles.sh --risk medium` | MATCH, 117 roles |
+| `compare-roles.sh --scope projects/…` | MATCH, but the project has no custom roles — see below |
+| `compare-billing-grants.sh --role-risk high` | MATCH, 2 grants |
+| `compare-billing-grants.sh --role-risk medium` | MATCH, 2 grants |
+| `compare-billing-grants.sh --role-risk medium --member-type user` | MATCH, 2 grants |
+
+The role-classification agreement is the substantive one: the tool's Python classifier and an
+independent jq reclassification of the same rules pick the same roles out of the live ~2,400
+role catalogue, at both risk levels. That also confirms `view=FULL` returns
+`includedPermissions` for predefined roles, which the fake-backed unit tests cannot.
+
+The billing path found `roles/billing.admin` held by a user on both accounts, and
+`unclassified_roles` empty — no custom roles are granted on either account.
+
+### Still unproven: custom roles
+
+**`compare-roles.sh --scope` has never run against a scope that actually has a custom role.**
+The estate has none, and no organization to hold org-level ones, so the scope path has only
+been exercised on the empty case. The open question is unchanged:
+
+> Does `iam.googleapis.com/v1/{scope}/roles?view=FULL` return `includedPermissions` for custom
+> roles as it does for predefined ones? If it does not, the classifier sees an empty permission
+> list and reports a custom role as **safe** — a silent under-report, and the worst failure
+> mode this tool has.
+
+It is plausible that it does — the same `view=FULL` parameter on the same endpoint family
+behaves correctly for predefined roles — but plausible is not verified, which is why the box
+above is ◐ and not ☑. Closing it needs one of:
+
+- a throwaway custom role in a sandbox project (`gcloud iam roles create … --permissions=…`,
+  then `compare-roles.sh --scope projects/…`, then `gcloud iam roles delete`); or
+- the first run against an estate that has custom roles of its own.
+
+Until then, treat `gcpe roles --scope` as unverified. `gcpe grants` is unaffected: it matches
+custom roles through CAI on permissions, and that path **is** verified.
+
+### Risk is a property of permissions, not role names
+
+A role's risk is the highest risk of any permission it holds. One rule set drives both
+endpoints — `/v1/roles` evaluates it against the IAM role catalogue, `/v1/grants` compiles it
+into `policy.role.permissions:(…)` for CAI — so they cannot disagree, and custom or unlisted
+roles are classified without anyone naming them. On the live catalogue the high rules select
+35 predefined roles (plus 60 service-agent roles), including `owner`, `editor`,
+`billing.admin`, `organizationAdmin` and `iam.securityAdmin`, and not `viewer`.
+
+### Verified facts that shaped this phase
+
+- **CAI caps a query at 32 alternations, counted as a product.** 32 permissions pass, 33 fail;
+  16 permissions × 2 member types pass, 17 × 2 fail; 10 × 3 pass, 11 × 3 fail
+  (`Query has too many alternations`). Permissions are therefore searched in batches sized to
+  the member-type count, and results merged per (resource, role, member, condition).
+- **`explanation.matched_permissions`** reports, per role, which queried permissions it holds —
+  so each grant says *why* it is risky. CAI returns whole policies; bindings are narrowed to the
+  matched roles and members to the requested types, a narrowing of rows already fetched.
+- **IAM policy search has no negation**, so service agents cannot be excluded in the query and
+  are hidden client-side, counted, and shown with `show_all` — the noise-reduction invariants.
+- **Billing accounts are not a CAI scope** (`Invalid scope [billingAccounts/…]`), hence the
+  separate `billing-grants` command. It takes no scope at all: billing accounts are not under
+  an organization in the IAM hierarchy, so there is nothing to bound them by, and the set
+  searched is "every account this caller can see". The call count is bounded by accounts, not
+  projects, which is why this does not reach the per-project iteration the PRD rejects.
+- **The Cloud Billing API reports role names only** — there is no `explanation` and no
+  `matched_permissions`, so risk has to be resolved against the role catalogue locally. A role
+  that is not in the catalogue (a custom role granted on the account) therefore cannot be
+  classified, and is reported in `unclassified_roles` rather than dropped.
+- **Custom roles exist at the organization and project levels only**, never on a folder, so a
+  folder scope to `gcpe roles --scope` is rejected rather than answered with predefined roles
+  alone — which would read as "no risky custom roles here" when the question was never asked.
+- **The role catalogue** is ~2,400 roles, ~10 MB, 3 pages from `iam.googleapis.com/v1/roles`.
+  It is cached in-process for 24 hours — the one cache on by default, because it is Google's
+  reference data about roles rather than the customer's estate.
+
+### Real findings on the dev estate
+
+In `gcp-sandbox-2026-18798`, the Compute Engine and App Engine **default service accounts hold
+Editor** — exactly what Google's service-account guidance and CIS 1.5 warn against. Also found:
+a user holding Owner, deploy service accounts holding Service Account User at project level
+(CIS 1.6), and GitHub workload-identity principals able to impersonate deploy accounts.
+
+---
+
+---
+
+## Phase 9 — `gcpe docs`, an interactive capability browser ☐
+
+**Goal:** one place that answers "what can this thing do?". Phase 8 took the tool to 9 CLI
+commands and 7 endpoints, documented across six markdown files plus generated Swagger — enough
+that its own author lost track of the surface area. That is the trigger for this phase.
+
+Written up as a pickup-ready item in
+[`docs/todo/gcpe-docs-capability-browser.md`](todo/gcpe-docs-capability-browser.md).
+
+- ☐ `app/capabilities.py` — a declarative catalogue of every capability: purpose, CLI form,
+  API equivalent, and a runnable example, reusing `Help` and `ASSET_TYPES` rather than
+  restating them.
+- ☐ A test asserting every CLI command and every route appears in the catalogue, so a new
+  capability cannot be added without listing it. This is the same staleness guard CI already
+  applies to `openapi.yml` and `CLI_REFERENCE.md`.
+- ☐ `GET /guide` (not `/docs` — FastAPI's Swagger UI already owns that) rendering the
+  catalogue, with a Run button per example.
+- ☐ `gcpe docs` to launch it, following `serve`'s pattern of running uvicorn against the same
+  app.
+
+### Executing from a page, safely
+
+The page must never execute a user-supplied string. It posts a catalogue **id**, and the
+server dispatches to the mapped `core` function in-process — no shell, no `subprocess`. The
+only free text is the scope, which already goes through `core.validate_scope`. Binding stays
+on 127.0.0.1 by default, as `serve` does, because every example runs a real read-only call
+against a real estate and bills the ADC quota project.
+
+### Why the catalogue comes before the page
+
+The catalogue plus its staleness test is the valuable half and is useful on its own: it makes
+drift between the surfaces and the documentation a build failure rather than something a
+reader notices months later. The page is a renderer over it. Build them in that order.
+
 ## Sequencing rationale
 
 Phase 1 comes first because every later phase adds fields, filters, or response shapes, and
@@ -519,4 +676,11 @@ than targeted search. Phase 4 is intentionally after the query shape stabilises,
 synchronous: FastAPI already runs plain `def` endpoints in a threadpool, so the concurrency is
 there without making the core a coroutine. Phases 5 and 6 are adoption work, needed only once
 other people or systems consume the tool. Phase 7 is deliberately unscheduled — async is a
-response to a measured ceiling, not a starting position.
+response to a measured ceiling, not a starting position. Phase 8 extends the tool from *what
+exists* to *who can change it*, reusing the server-side query, invariant and differential-check
+patterns of the earlier phases. Phase 9 is a consequence of Phase 8 rather than a plan: the
+surface grew past what six markdown files explain well, and the fix is a catalogue the code
+cannot drift from.
+
+Deferred items that are not whole phases live in [`docs/todo/`](todo/), one self-contained
+handoff per item.

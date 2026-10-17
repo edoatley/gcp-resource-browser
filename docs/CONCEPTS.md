@@ -138,3 +138,23 @@ polling of the same search.
 
 CAI is a near-real-time index, not a live read of each service. A resource created or deleted
 moments ago may not appear yet. The [PRD](PRD.md) explains why this trade-off was accepted.
+
+## Role risk
+
+`roles` and `grants` classify IAM roles as `high` or `medium` risk **by the permissions they
+contain**. A role is as risky as its riskiest permission. The rules, the reasons and the quoted
+sources (Google's IAM documentation, the CIS GCP Benchmark, and Rhino Security Labs'
+privilege-escalation research) are in [Role risk](ROLE_RISK.md). A risk filter means "at least":
+`medium` includes `high`.
+
+Because risk is a property of permissions, **custom roles are classified too** — nobody has to
+name them. `grants` matches them at any scope, since the match happens on permissions inside
+CAI. `roles` lists them when given a scope (`--scope` / `?scope=`), which costs one call per
+organization or project; IAM has no folder-level custom roles, so a folder scope is rejected.
+
+**Billing accounts need their own command.** Cloud Asset Inventory does not index them and
+`billingAccounts/…` is not a valid CAI scope, so no `grants` scope reaches them however wide.
+`billing-grants` (`GET /v1/billing-grants`) reads the Cloud Billing API instead, and takes no
+scope: billing accounts sit outside the resource hierarchy, so there is nothing to bound them
+by. Role names are all that API returns, so risk is resolved against the predefined catalogue
+and a role that is not in it is reported as unclassified rather than assumed safe.

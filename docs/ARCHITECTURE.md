@@ -38,7 +38,7 @@ core so the two surfaces cannot drift apart.
 
 | Module | Responsibility |
 |:---|:---|
-| `app/core.py` | Validation, type resolution, project ID↔number resolution, the CAI call, exception translation into domain errors. `stream_resources` yields rows. `search_resources` collects them and adds project IDs, IAM and caching. |
+| `app/core.py` | Also `list_risky_roles` (IAM role catalogue cached 24 h, plus uncached custom roles per scope), `search_grants` (CAI IAM policy search, batched) and `search_billing_grants` (Cloud Billing API, one policy per account). Validation, type resolution, project ID↔number resolution, the CAI call, exception translation into domain errors. `stream_resources` yields rows. `search_resources` collects them and adds project IDs, IAM and caching. |
 | `app/query.py` | Compiles filters into CAI query syntax. **The highest-risk code here** (see below). |
 | `app/params.py` | `SearchFilters` (what a search takes), `Help` (how each filter is described), `SORTABLE_FIELDS`, `DEFAULT_LIMIT`. Shared by both surfaces. |
 | `app/noise.py` + `noise_rules.json` | Client-side suppression of low-signal resources. |
@@ -47,6 +47,7 @@ core so the two surfaces cannot drift apart.
 | `app/fanout.py` | Bounded concurrent search across several scopes. |
 | `app/cache.py` | Opt-in TTL response cache, inactive unless a request sets a TTL. |
 | `app/output.py` | JSON and CSV emitters for the CLI. |
+| `app/role_risk.py` + `role_risk_rules.json` | Which permissions make a role risky, with cited sources. Pure; `core` does the I/O. |
 | `app/gcloud.py` | Renders a search as the equivalent `gcloud asset` command (`--show-gcloud`). |
 | `app/models.py` | Pydantic wire models: `Resource`, `ResourceList`, `Summary`, `ErrorResponse`. These also produce the OpenAPI schema. |
 | `app/asset_types.json` | Friendly name → CAI asset type. Also read by `scripts/` with `jq`. |
@@ -114,6 +115,49 @@ them:
   code (`cli._EXIT_BY_ERROR`) or HTTP status (`api._STATUS_BY_ERROR`).
 - **The cache is off by default**, and every filter is part of its key.
 
+## Role risk is derived from permissions
+
+`/v1/roles`, `/v1/grants` and `/v1/billing-grants` share one rule set, which maps permissions
+to a risk level. A role's risk is the highest risk of any permission it holds. `/v1/roles`
+evaluates the rules against the IAM role catalogue, `/v1/grants` compiles them into
+`policy.role.permissions:(…)` for CAI, and `/v1/billing-grants` resolves each role's
+permissions from the catalogue because the Cloud Billing API reports names only. The three
+cannot disagree, and custom roles are covered without being named. See
+[Role risk](ROLE_RISK.md).
+
+Four constraints shape `search_grants`, all verified against the live API:
+
+- **32 alternations per query**, counted as permissions × member types. Permissions are batched
+  to fit, and results are merged per (resource, role, member, condition).
+- **CAI returns whole policies.** Bindings are narrowed to the roles CAI reports in
+  `explanation.matched_permissions`, and members to the requested types. This narrows rows
+  already fetched; it never fetches more.
+- **No negation in IAM policy search**, so service agents are hidden client-side, counted, and
+  shown with `show_all`. These are the same invariants as noise reduction.
+- **A scope cannot see grants above it.** Every response carries a `coverage_note`.
+
+The **predefined** IAM role catalogue is the **only cache that is on by default** (24 hours).
+It is Google's reference data about what roles contain, not the customer's estate, so a
+day-old copy cannot hide a fix someone is verifying. Results from estate searches stay
+uncached by default — including custom roles, which are the customer's own definitions and are
+re-read on every call.
+
+Two more constraints shape the billing path:
+
+- **Billing accounts are not a CAI scope** (`Invalid scope [billingAccounts/…]`, verified), and
+  CAI does not index them, so they need the Cloud Billing API. The call count is bounded by
+  the number of accounts — one `list`, then one `getIamPolicy` each — not by projects, which
+  is why this does not run into the per-project iteration the PRD rejects.
+- **The Cloud Billing API returns role names, with no `matched_permissions`.** Risk is
+  therefore resolved locally against the catalogue, and a role missing from it lands in
+  `unclassified_roles`. Dropping it would be the silent under-report this tool exists to avoid.
+
+**Custom roles cannot be defined on a folder** — IAM supports the organization and project
+levels only — so `list_risky_roles` rejects a folder scope instead of answering with
+predefined roles alone, which would read as "this folder has no risky custom roles" when the
+question was never asked. An organization scope lists the custom roles defined on the
+organization, not those inside each project: that would be one call per project.
+
 ## Synchronous by design
 
 API endpoints are plain `def` functions. Starlette runs them in a threadpool, so they are
@@ -159,3 +203,30 @@ declarations.
 Define it in `core.py` with a `code`, then map it in **both** `api._STATUS_BY_ERROR` and
 `cli._EXIT_BY_ERROR`. When translating a Google exception, include `exc.message` in the error
 instead of guessing at the cause.
+
+### Adding a risk rule
+
+1. Add it to `app/role_risk_rules.json` with a `reason` and at least one `sources` id, and add
+   the source itself if it is new. **A rule without a source does not go in** — the point of
+   the ruleset is that a reviewer can check it rather than trust it.
+2. Document it in [ROLE_RISK.md](ROLE_RISK.md). `tests/test_role_risk.py` fails if any rule or
+   source URL is missing from that page.
+3. Nothing else: `/v1/roles`, `/v1/grants` and `/v1/billing-grants` all read the same ruleset,
+   so one change reaches all three. Do not add a role-name list beside it, or they can
+   disagree.
+
+Sites can add rules without a code change via `role_risk_rules` in
+[configuration](CONFIGURATION.md); a site rule replaces a default for the same permission.
+
+### Adding a Google REST API
+
+CAI goes through a generated client, but the IAM role catalogue and Cloud Billing are plain
+REST behind `core.get_rest_session()`. To add another:
+
+1. Call it through `get_rest_session()` — one place decides the auth scope — and through
+   `_paginate` if it is a list call, so pagination is not reimplemented.
+2. Translate failures with `_rest_error`, passing a `remedy` naming the role and API needed.
+   It already separates `SERVICE_DISABLED` from a real 403: Google returns 403 for both, and
+   they are usually fixed on different projects.
+3. Decide caching deliberately. Google's own reference data may be cached; anything describing
+   the customer's estate must not be, or an audit can be answered from a stale copy.

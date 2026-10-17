@@ -79,9 +79,11 @@ class FakeAssetClient:
         self.last_request: asset_v1.SearchAllResourcesRequest | None = None
         self.requests: list[asset_v1.SearchAllResourcesRequest] = []
         self.iam_request: asset_v1.SearchAllIamPoliciesRequest | None = None
+        self.iam_requests: list[asset_v1.SearchAllIamPoliciesRequest] = []
 
     def search_all_iam_policies(self, request: asset_v1.SearchAllIamPoliciesRequest):
         self.iam_request = request
+        self.iam_requests.append(request)
         if self.raises is not None:
             raise self.raises
         return iter(self.iam_policies)
@@ -108,12 +110,29 @@ def make_iam_result(
     resource: str = "//storage.googleapis.com/buckets/example",
     role: str = "roles/storage.admin",
     members: tuple[str, ...] = ("user:someone@example.com",),
+    matched: dict[str, list[str]] | None = None,
+    extra_bindings: dict[str, tuple[str, ...]] | None = None,
+    condition: str = "",
 ) -> asset_v1.IamPolicySearchResult:
-    """A CAI IAM policy result; `resource` is the join key."""
+    """A CAI IAM policy result; `resource` is the join key.
+
+    `matched` mimics `explanation.matched_permissions`, which CAI fills only
+    for permission queries: role -> the queried permissions that role holds.
+    """
     result = asset_v1.IamPolicySearchResult(resource=resource)
     binding = result.policy.bindings.add()
     binding.role = role
     binding.members.extend(members)
+    if condition:
+        binding.condition.expression = condition
+    for extra_role, extra_members in (extra_bindings or {}).items():
+        extra = result.policy.bindings.add()
+        extra.role = extra_role
+        extra.members.extend(extra_members)
+    for matched_role, permissions in (matched or {}).items():
+        result.explanation.matched_permissions[matched_role] = (
+            asset_v1.IamPolicySearchResult.Explanation.Permissions(permissions=permissions)
+        )
     return result
 
 
@@ -151,3 +170,64 @@ def service_disabled_error(
         f"{service} has not been used in project {quota_project} before or it is disabled.",
         details=[info],
     )
+
+
+# --- REST fakes (IAM role catalogue, Cloud Billing) --------------------------
+#
+# Both live behind an AuthorizedSession rather than a generated client, so a
+# fake only has to answer `get`. Routing by URL rather than by call order lets
+# one session serve a billing search, which interleaves a role-catalogue read,
+# an account list and a getIamPolicy per account.
+
+PREDEFINED_ROLES_URL = "iam.googleapis.com/v1/roles"
+BILLING_ACCOUNTS_URL = "cloudbilling.googleapis.com/v1/billingAccounts"
+
+
+class FakeResponse:
+    def __init__(self, body: dict, status: int = 200) -> None:
+        self._body, self.status_code, self.ok = body, status, status < 400
+
+    def json(self) -> dict:
+        return self._body
+
+
+class FakeRestSession:
+    """Answers `get` from URL-matched responses; records every call made.
+
+    A route's value may be a list, which is consumed one response per call so
+    pagination can be exercised; the last entry answers any further calls.
+    """
+
+    def __init__(self, routes: dict[str, FakeResponse | list[FakeResponse]]) -> None:
+        self._routes = {
+            pattern: list(value) if isinstance(value, list) else [value]
+            for pattern, value in routes.items()
+        }
+        self.calls: list[tuple[str, dict]] = []
+
+    def get(self, url: str, params: dict | None = None) -> FakeResponse:
+        self.calls.append((url, dict(params or {})))
+        # Longest pattern first, so ".../billingAccounts/X:getIamPolicy" wins
+        # over the ".../billingAccounts" list route it contains.
+        for pattern in sorted(self._routes, key=len, reverse=True):
+            if pattern in url:
+                queue = self._routes[pattern]
+                return queue.pop(0) if len(queue) > 1 else queue[0]
+        raise AssertionError(f"FakeRestSession got an unexpected request: {url}")
+
+    def urls(self) -> list[str]:
+        return [url for url, _ in self.calls]
+
+
+def role_pages(*roles: tuple[str, list[str]]) -> list[FakeResponse]:
+    """Role definitions split across two pages, so pagination is exercised."""
+    raw = [{"name": n, "title": n, "stage": "GA", "includedPermissions": p} for n, p in roles]
+    return [
+        FakeResponse({"roles": raw[:1], "nextPageToken": "next"}),
+        FakeResponse({"roles": raw[1:]}),
+    ]
+
+
+def catalogue(*roles: tuple[str, list[str]], **routes) -> FakeRestSession:
+    """A session serving the predefined catalogue, plus any extra routes."""
+    return FakeRestSession({PREDEFINED_ROLES_URL: role_pages(*roles), **routes})

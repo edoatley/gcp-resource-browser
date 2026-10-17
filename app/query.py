@@ -137,3 +137,22 @@ def build_query(
         terms.append(raw.strip())
 
     return " ".join(terms)
+
+
+def grant_query(permissions: Iterable[str], member_types: Iterable[str] = ()) -> str:
+    """Compile a high-risk-grant search for `searchAllIamPolicies`.
+
+    `policy.role.permissions:` matches a binding whose role -- predefined or
+    custom -- includes any of the permissions, which is what lets risk be
+    defined by permission rather than by a list of role names. CAI reports the
+    matched permissions per role in `explanation.matched_permissions`.
+
+    Keep the alternation product within `role_risk.MAX_QUERY_ALTERNATIONS`;
+    the caller batches permissions to do so. Negation is not supported in IAM
+    policy searches, so exclusions (service agents) cannot be expressed here.
+    """
+    terms = [_alternation("policy.role.permissions", permissions)]
+    member_types = list(member_types)
+    if member_types:
+        terms.append(_alternation("memberTypes", member_types))
+    return " ".join(terms)

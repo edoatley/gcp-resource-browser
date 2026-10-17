@@ -1,0 +1,90 @@
+{
+  "_comment": [
+    "Role risk is derived from PERMISSIONS, not from a list of role names. A role's risk is the",
+    "highest risk of any permission it contains, so predefined roles nobody listed and custom",
+    "roles are classified by the same rules, and /v1/roles and /v1/grants can never disagree.",
+    "",
+    "Every rule cites the sources below by id. Each source entry quotes the passage the rule",
+    "relies on, so the classification can be checked rather than taken on trust.",
+    "",
+    "Levels: `high` = the holder can grant themselves (or anyone) more access, or act as a",
+    "more privileged identity. `medium` = the holder can widen access to one resource, or mint",
+    "a credential scoped to one service.",
+    "",
+    "Deliberately NOT listed: cloudfunctions.functions.create, compute.instances.create,",
+    "run.services.create, cloudscheduler.jobs.create (rhino-part1). Each escalates only by",
+    "attaching a more privileged service account, which requires iam.serviceAccounts.actAs --",
+    "already high below. Listing them would flood results with every deployer role."
+  ],
+  "sources": {
+    "gcp-roles-overview": {
+      "title": "Google Cloud IAM: Roles and permissions -- Basic roles",
+      "url": "https://cloud.google.com/iam/docs/roles-overview#basic",
+      "quote": "Caution: Basic roles include thousands of permissions across all Google Cloud services. In production environments, do not grant basic roles unless there is no alternative. ... Owner: All Editor permissions, plus permissions for actions like ... Managing roles and permissions for a project and all resources within the project."
+    },
+    "gcp-sa-impersonation": {
+      "title": "Google Cloud IAM: Service account impersonation",
+      "url": "https://cloud.google.com/iam/docs/service-account-impersonation",
+      "quote": "To impersonate a service account, you need the iam.serviceAccounts.getAccessToken permission ... [direct access or keys] can create privilege-escalation and non-repudiation risks."
+    },
+    "gcp-sa-best-practices": {
+      "title": "Google Cloud IAM: Best practices for using service accounts securely",
+      "url": "https://cloud.google.com/iam/docs/best-practices-service-accounts",
+      "quote": "Avoid letting users authenticate as service accounts that are more privileged than the users themselves ... Granting a user permission to impersonate a more privileged service account can be a way to deliberately let users temporarily elevate their privileges. ... Before you assign any role that includes the iam.serviceAccountKeys.create permission to a user, ask yourself which resources ... the user could gain access to by impersonating the service account."
+    },
+    "gcp-sa-types": {
+      "title": "Google Cloud IAM: Service account types (service agents, default service accounts)",
+      "url": "https://cloud.google.com/iam/docs/service-account-types",
+      "quote": "Google Cloud creates and manages service accounts for many Google Cloud services. These service accounts are known as service agents. ... the default service account might automatically be granted the Editor role on your project. We strongly recommend that you disable the automatic role grant."
+    },
+    "gcp-billing-access": {
+      "title": "Google Cloud Billing: Overview of Cloud Billing access control -- Billing Account Administrator",
+      "url": "https://cloud.google.com/billing/docs/how-to/billing-access",
+      "quote": "Billing Account Administrator (roles/billing.admin): Manage billing accounts (but not create them). ... [can] add and edit payment methods ... link and unlink projects, and manage other user roles on the billing account."
+    },
+    "cis-gcp-1.5": {
+      "title": "CIS Google Cloud Platform Foundation Benchmark v4.0.0, 1.5 Ensure That Service Account Has No Admin Privileges (1.6 in v5.0.0)",
+      "url": "https://www.cisecurity.org/benchmark/google_cloud_computing_platform",
+      "quote": "It's recommended not to use admin access for ServiceAccount. [Remediation identifies user-managed service accounts with roles containing *Admin or *admin, or Editor, or Owner.]"
+    },
+    "cis-gcp-1.6": {
+      "title": "CIS Google Cloud Platform Foundation Benchmark, 1.6 Ensure That IAM Users Are Not Assigned the Service Account User or Service Account Token Creator Roles at Project Level",
+      "url": "https://www.cisecurity.org/benchmark/google_cloud_computing_platform",
+      "quote": "Assign the Service Account User (iam.serviceAccountUser) and Service Account Token Creator (iam.serviceAccountTokenCreator) roles to a user for a specific service account rather than assigning the role to a user at project level."
+    },
+    "rhino-part1": {
+      "title": "Rhino Security Labs (Spencer Gietzen): Privilege Escalation in Google Cloud Platform -- Part 1 (IAM)",
+      "url": "https://rhinosecuritylabs.com/gcp/privilege-escalation-google-cloud-platform-part-1/",
+      "quote": "Methods covered: deploymentmanager.deployments.create, iam.roles.update, iam.serviceAccounts.getAccessToken, iam.serviceAccountKeys.create, iam.serviceAccounts.implicitDelegation, iam.serviceAccounts.signBlob, iam.serviceAccounts.signJwt, iam.serviceAccounts.actAs, cloudfunctions.functions.create, cloudfunctions.functions.update, compute.instances.create, run.services.create, cloudscheduler.jobs.create."
+    },
+    "rhino-part2": {
+      "title": "Rhino Security Labs (Spencer Gietzen): Privilege Escalation in Google Cloud Platform -- Part 2 (Non-IAM)",
+      "url": "https://rhinosecuritylabs.com/cloud-security/privilege-escalation-google-cloud-platform-part-2/",
+      "quote": "orgpolicy.policy.set ... storage.hmacKeys.create ... serviceusage.apiKeys.create ... resourcemanager.organizations.setIamPolicy: Attach IAM roles to your user at the Organization level ... resourcemanager.folders.setIamPolicy ... resourcemanager.projects.setIamPolicy ... iam.serviceAccounts.setIamPolicy ... cloudfunctions.functions.setIamPolicy ... As of the time of writing this blog post, the following permissions are all the different IAM policies that you can update: [list includes storage.buckets.setIamPolicy, secretmanager.secrets.setIamPolicy, run.services.setIamPolicy, pubsub.topics.setIamPolicy, cloudkms.cryptoKeys.setIamPolicy]."
+    }
+  },
+  "rules": [
+    {"permission": "resourcemanager.organizations.setIamPolicy", "risk": "high", "reason": "Can grant any role on the organization, and so everything in it", "sources": ["rhino-part2"]},
+    {"permission": "resourcemanager.folders.setIamPolicy", "risk": "high", "reason": "Can grant any role on a folder and every project beneath it", "sources": ["rhino-part2"]},
+    {"permission": "resourcemanager.projects.setIamPolicy", "risk": "high", "reason": "Can grant any role on the project, including to themselves", "sources": ["rhino-part2", "gcp-roles-overview"]},
+    {"permission": "billing.accounts.setIamPolicy", "risk": "high", "reason": "Can decide who administers a billing account", "sources": ["gcp-billing-access"]},
+    {"permission": "iam.serviceAccounts.getAccessToken", "risk": "high", "reason": "Can impersonate a service account and use all of its access", "sources": ["rhino-part1", "gcp-sa-impersonation", "cis-gcp-1.6"]},
+    {"permission": "iam.serviceAccounts.signBlob", "risk": "high", "reason": "Can sign as a service account to obtain its access tokens", "sources": ["rhino-part1"]},
+    {"permission": "iam.serviceAccounts.signJwt", "risk": "high", "reason": "Can sign JWTs as a service account to obtain its access tokens", "sources": ["rhino-part1"]},
+    {"permission": "iam.serviceAccounts.implicitDelegation", "risk": "high", "reason": "Can chain through one service account to impersonate another", "sources": ["rhino-part1"]},
+    {"permission": "iam.serviceAccountKeys.create", "risk": "high", "reason": "Can mint a long-lived key for a service account", "sources": ["rhino-part1", "gcp-sa-best-practices"]},
+    {"permission": "iam.serviceAccounts.actAs", "risk": "high", "reason": "Can run workloads as a service account, gaining its access", "sources": ["rhino-part1", "cis-gcp-1.6", "gcp-sa-best-practices"]},
+    {"permission": "iam.serviceAccounts.setIamPolicy", "risk": "high", "reason": "Can grant themselves the right to impersonate a service account", "sources": ["rhino-part2"]},
+    {"permission": "iam.roles.update", "risk": "high", "reason": "Can add permissions to a custom role they already hold", "sources": ["rhino-part1"]},
+    {"permission": "orgpolicy.policy.set", "risk": "high", "reason": "Can disable organization policy guardrails", "sources": ["rhino-part2"]},
+    {"permission": "deploymentmanager.deployments.create", "risk": "high", "reason": "Deploys as the Google APIs service account, which has Editor by default", "sources": ["rhino-part1"]},
+    {"permission": "storage.hmacKeys.create", "risk": "medium", "reason": "Can mint Cloud Storage HMAC keys for a service account", "sources": ["rhino-part2"]},
+    {"permission": "serviceusage.apiKeys.create", "risk": "medium", "reason": "Can create unrestricted API keys", "sources": ["rhino-part2"]},
+    {"permission": "storage.buckets.setIamPolicy", "risk": "medium", "reason": "Can grant access to a bucket, including publicly", "sources": ["rhino-part2"]},
+    {"permission": "secretmanager.secrets.setIamPolicy", "risk": "medium", "reason": "Can grant access to a secret", "sources": ["rhino-part2"]},
+    {"permission": "cloudfunctions.functions.setIamPolicy", "risk": "medium", "reason": "Can grant invoke access to a function, including publicly", "sources": ["rhino-part2"]},
+    {"permission": "run.services.setIamPolicy", "risk": "medium", "reason": "Can grant invoke access to a Cloud Run service, including publicly", "sources": ["rhino-part2"]},
+    {"permission": "pubsub.topics.setIamPolicy", "risk": "medium", "reason": "Can grant publish or subscribe access to a topic", "sources": ["rhino-part2"]},
+    {"permission": "cloudkms.cryptoKeys.setIamPolicy", "risk": "medium", "reason": "Can grant use of an encryption key", "sources": ["rhino-part2"]}
+  ]
+}

@@ -28,7 +28,11 @@ the file and point `GCP_EXPLORER_CONFIG` at it.
     { "asset_type": "acme.example.com/Widget", "reason": "internal churn" },
     { "asset_type": "compute.googleapis.com/Firewall", "name": "^default-allow-", "reason": "default firewall rules" }
   ],
-  "unsuppress": ["compute.googleapis.com/Route"]
+  "unsuppress": ["compute.googleapis.com/Route"],
+  "role_risk_rules": [
+    { "permission": "compute.instances.setMetadata", "risk": "high", "reason": "Can add SSH keys to VMs" },
+    { "permission": "storage.buckets.setIamPolicy", "risk": "high", "reason": "Public buckets are an incident here" }
+  ]
 }
 ```
 
@@ -37,6 +41,7 @@ the file and point `GCP_EXPLORER_CONFIG` at it.
 | `asset_types` | Friendly name → CAI asset type. Adds to the built-in names; reusing a built-in name replaces it. |
 | `noise_rules` | Extra suppression rules. Each needs `asset_type` (exact match) and `reason`, which is shown to users, so keep it short. An optional `name` is a regex matched against the resource's short name, so a rule can hide only some resources of a type. An optional `note` is documentation only. |
 | `unsuppress` | CAI asset types whose **built-in** rules are switched off. Rules you add yourself are not affected. |
+| `role_risk_rules` | Extra or overriding [role risk](ROLE_RISK.md) rules: `permission`, `risk` (`high` or `medium`), `reason`, and optional `sources`. A site rule for a permission **replaces** the built-in rule, so you can raise or lower a level. |
 
 Unknown top-level keys are rejected, not ignored, so a misspelled key cannot leave you thinking
 a setting was applied when it wasn't. Malformed JSON, or a rule without `asset_type` or

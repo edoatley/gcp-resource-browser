@@ -54,6 +54,8 @@ implementations and a differential checker for that:
     --type bucket --type vm --label env=prod --location europe-west2
 
 ./scripts/check-noise.sh projects/my-project   # suppressed result ⊂ full result
+
+./scripts/compare-grants.sh --scope organizations/123 --role-risk medium   # risky grants vs gcloud
 ```
 
 `compare-resources.sh` diffs the tool's output against `gcloud asset search-all-resources` and

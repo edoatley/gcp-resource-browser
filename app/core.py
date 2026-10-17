@@ -705,6 +705,8 @@ def fetch_role_catalogue(session=None) -> list[dict]:
     roles = _paginate(
         session or get_rest_session(),
         IAM_ROLES_URL,
+        # view=FULL is load-bearing: the default BASIC view omits
+        # includedPermissions, which would classify every role as safe.
         {"view": "FULL", "pageSize": 1000},
         key="roles",
         what="IAM role listing",

@@ -4,8 +4,9 @@
 tool has with a runnable example per capability — so you can see what it does without
 reconstructing it from six markdown files.
 
-**Branch context:** `feat/role-risk` — Phase 8 added `roles`, `grants` and `billing-grants`,
-taking the tool to 9 CLI commands and 7 endpoints. That growth is what prompted this.
+**Origin:** Phase 8 (merged in #2, `54b1a89`) added `roles`, `grants` and `billing-grants`,
+taking the tool to 9 CLI commands and 7 endpoints. That growth is what prompted this. Branch
+fresh from `main`.
 
 ## Why deferred
 

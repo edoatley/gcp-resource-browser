@@ -148,7 +148,15 @@ Phases 0–3, 5, 6 and most of 8 are built. Still open: Phase 4's baseline measu
 organisation, effective (inherited) IAM, Phase 8's group expansion, and the deliberately
 conditional Phase 7, and Phase 9 (`gcpe docs`). Deferred items that are not whole phases live
 in `docs/todo/`, one self-contained handoff each — check there before designing something that
-may already be specified. **Check
+may already be specified.
+
+**The dev estate has no organization**, 7 projects and 2 billing accounts (see
+`docs/WALKTHROUGH.md` for the per-project breakdown). That is a standing constraint on what
+can be proven here, not a gap in the code: anything org-scoped is unverifiable on this estate.
+It blocks Phase 4's baseline ("measured on a real organisation"), group expansion (no
+organization means no GCP-visible groups), and org-level custom roles. Project-scoped
+equivalents work and are verified. Don't plan a verification step that needs an org without
+checking whether one exists yet. **Check
 `docs/DELIVERY_PLAN.md` before assuming a missing feature is out of scope** — it phases this work and records the sequencing rationale. Keep its checkboxes
 current as phases land, and keep the status note near the top of `README.md` in step.
 

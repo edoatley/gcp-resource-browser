@@ -3,8 +3,9 @@
 **Summary:** Expand `group:` members in risky-grant results into the people they actually
 contain, so an over-permissioning review can see headcount rather than a group name.
 
-**Branch context:** `feat/role-risk` — Phase 8 (high-risk roles and grants). The other two
-Phase 8 items (billing-account IAM, custom-role listing) landed in that PR; this is the third.
+**Origin:** Phase 8 (high-risk roles and grants), merged in #2 (`54b1a89`) and #3 (`e53c8ec`).
+The other two Phase 8 items — billing-account IAM and custom-role listing — landed and were
+verified live there; this is the third and last. Branch fresh from `main`.
 
 ## Why deferred
 

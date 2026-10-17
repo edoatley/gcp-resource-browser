@@ -677,6 +677,24 @@ The catalogue plus its staleness test is the valuable half and is useful on its 
 drift between the surfaces and the documentation a build failure rather than something a
 reader notices months later. The page is a renderer over it. Build them in that order.
 
+## Phase 10 — Harden the role risk rules ☐
+
+**Goal:** make `app/role_risk_rules.json` checkable, not just cited. An external review
+(2026-10) found escalation paths the rules miss where `iam.serviceAccounts.actAs` is not
+needed, such as `cloudbuild.builds.create` and `compute.instances.setMetadata`. It also found
+that nothing stops a misspelled or retired permission from silently matching nothing. Some of
+the review's claims were wrong on inspection; the handoff records which.
+
+Written up as a pickup-ready item in
+[`docs/todo/role-risk-rules-hardening.md`](todo/role-risk-rules-hardening.md).
+
+- ☐ Every rule permission must exist in the IAM catalogue: a unit test on a snapshot, plus a
+  live script.
+- ☐ Every source must be cited by a rule or by `ROLE_RISK.md`, and site rules may cite only
+  known sources.
+- ☐ A site rule may not downgrade a default silently.
+- ☐ Candidate rules, each verified live and given a primary source before being added.
+
 ## Sequencing rationale
 
 Phase 1 comes first because every later phase adds fields, filters, or response shapes, and

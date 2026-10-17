@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI, Query
 from fastapi.requests import Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
 from app import core
 from app.aggregate import summarise
@@ -43,6 +43,9 @@ app = FastAPI(
         "via Cloud Asset Inventory."
     ),
     version="0.1.0",
+    # Under /api so that /docs can be the capability browser (`gcpe docs`).
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
 )
 
 # Core error -> HTTP status. Anything unmapped is a 500.
@@ -333,6 +336,17 @@ def list_types() -> dict[str, str]:
     convenience listing rather than the set of what can be searched.
     """
     return dict(sorted(core.ASSET_TYPES.items()))
+
+
+@app.get("/docs", include_in_schema=False)
+def docs_redirect() -> RedirectResponse:
+    """Swagger lived at /docs; keep old links working.
+
+    The capability browser is mounted at /docs only by `gcpe docs`, which
+    routes ahead of this. A deployed `gcpe serve` never exposes it, because it
+    shows the session's identity and runs examples against its estate.
+    """
+    return RedirectResponse("/api/docs", status_code=307)
 
 
 @app.get("/healthz", summary="Liveness probe", include_in_schema=False)

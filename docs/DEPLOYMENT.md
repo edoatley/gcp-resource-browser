@@ -37,6 +37,10 @@ docker run --rm \
 [GCP setup](GCP_SETUP.md)). To use a [site config](CONFIGURATION.md), mount it as well and set
 `GCP_EXPLORER_CONFIG`.
 
+The capability browser (`gcpe docs`) is deliberately not part of the image's server: it
+shows the session's identity and runs searches as it, so it is for a developer's machine. On
+a deployment, `/docs` redirects to Swagger at `/api/docs`.
+
 ## Cloud Run and GKE
 
 **No credentials are baked into the image**, and CI fails the build if a credential-shaped

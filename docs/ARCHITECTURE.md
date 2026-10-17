@@ -49,6 +49,7 @@ core so the two surfaces cannot drift apart.
 | `app/output.py` | JSON and CSV emitters for the CLI. |
 | `app/role_risk.py` + `role_risk_rules.json` | Which permissions make a role risky, with cited sources. Pure; `core` does the I/O. |
 | `app/gcloud.py` | Renders a search as the equivalent `gcloud asset` command (`--show-gcloud`). |
+| `app/docs_site.py` + `static/docs/` | The `gcpe docs` browser: the catalogue rendered for a scope, session context, the scope picker. Local only; see [below](#the-capability-catalogue). |
 | `app/capabilities.py` | The capability catalogue: every capability with runnable examples, each rendered as a `gcpe` command, a `/v1` URL and `gcloud`. See [below](#the-capability-catalogue). |
 | `app/models.py` | Pydantic wire models: `Resource`, `ResourceList`, `Summary`, `ErrorResponse`. These also produce the OpenAPI schema. |
 | `app/asset_types.json` | Friendly name → CAI asset type. Also read by `scripts/` with `jq`. |
@@ -189,6 +190,20 @@ their examples, and derives everything else from the code that implements them.
 - a docs link points at a heading that no longer exists;
 - an example stops running through `TestClient` or `CliRunner`;
 - an example's gcloud form differs from what `--show-gcloud` prints for the same arguments.
+
+### The browser over it
+
+`app/docs_site.py` builds a separate app for `gcpe docs`. Its own routes come first
+(`/docs`, `/docs/static`, and `/docs/_/{catalogue,session,projects}`), and everything else
+falls through to the unchanged API app. "Call API" is therefore a plain `fetch` of a `/v1` URL
+that the catalogue rendered. There is no run endpoint, no shell, and nothing the API would not
+accept from any other client.
+
+`gcpe serve` never builds this app. On a server, `/docs` redirects to Swagger at `/api/docs`.
+The session context (`core.session_context`) is read locally, apart from one best-effort
+tokeninfo call for a user credential's email. The scope picker (`core.list_visible_projects`)
+is one Resource Manager search, cached for five minutes because it fills a dropdown rather
+than answering an audit. `scripts/compare-projects.sh` diffs it against `gcloud projects list`.
 
 ## Extending
 

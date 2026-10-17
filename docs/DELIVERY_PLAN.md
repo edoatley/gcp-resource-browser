@@ -642,9 +642,6 @@ a user holding Owner, deploy service accounts holding Service Account User at pr
 commands and 7 endpoints, documented across six markdown files plus generated Swagger — enough
 that its own author lost track of the surface area. That is the trigger for this phase.
 
-Written up as a pickup-ready item in
-[`docs/todo/gcpe-docs-capability-browser.md`](todo/gcpe-docs-capability-browser.md).
-
 - ☑ `app/capabilities.py` — a declarative catalogue of every capability. It holds:
   - the purpose (the route's summary);
   - parameters, derived from both signatures and paired by shared `Help` text;
@@ -653,18 +650,32 @@ Written up as a pickup-ready item in
   excluded. Every example must run on both surfaces, and its gcloud form must match
   `--show-gcloud`. This is the same staleness guard CI already applies to `openapi.yml` and
   `CLI_REFERENCE.md`.
-- ☐ `GET /docs`, rendering the catalogue: one page per capability, with copyable
-  CLI / API / gcloud forms and an inline "Try it" per example. Swagger moves to `/api/docs`.
-  On `gcpe serve`, `/docs` redirects there.
-- ☐ Session context in place of placeholders:
-  - principal, ADC quota project and default project, all read locally;
-  - a lazy scope picker from one Resource Manager `projects.search` call.
-- ☐ `gcpe docs` to launch it, following `serve`'s pattern of running uvicorn against the same
-  app.
+- ☑ `/docs`, rendering the catalogue (`app/docs_site.py`, `app/static/docs/`). One page per
+  capability, with copyable CLI / API / gcloud forms and an inline "Call API" per example.
+  Swagger moved to `/api/docs`; on `gcpe serve`, `/docs` redirects there. **Verified live**
+  on 2026-10-17 against `projects/gcp-sandbox-2026-18798`:
+  - all 16 runnable examples returned 200 through the browser's server;
+  - each one's CLI form (`-o json`) returned the same count as its API call;
+  - each search and summary gcloud form returned the API count plus the hidden rows.
+- ☑ Session context in place of placeholders: principal, ADC quota project and default project.
+  Verified live with a user credential: the principal came from tokeninfo, and the default
+  scope was the ADC project.
+- ◐ The scope picker: one Resource Manager `projects.search` call, with
+  `scripts/compare-projects.sh` against `gcloud projects list`. It is unit-tested, and the
+  `SERVICE_DISABLED` path was verified live: it names `gcp-resource-browser-eo`. The list
+  itself is unverified until `cloudresourcemanager.googleapis.com` is enabled there. Re-run
+  `scripts/setup-gcp.sh`, which now enables it, then `scripts/compare-projects.sh`.
+- ☑ `gcpe docs [--host] [--port] [--no-browser]`, local only. It warns when bound off
+  loopback.
+- ☐ A parameter builder. Each page leads with an editable form, examples fill it as presets,
+  and the forms re-render live through a server-side render endpoint. Handoff:
+  [`docs/todo/docs-parameter-builder.md`](todo/docs-parameter-builder.md).
+- ☐ A click-through of the page in a browser. The server side above is verified; the
+  rendering, copy buttons and NDJSON streaming in the page are not covered by tests.
 
 ### Executing from a page, safely
 
-The page never executes a string. Every capability is already a read-only `GET`, so "Try it"
+The page never executes a string. Every capability is already a read-only `GET`, so "Call API"
 is a `fetch` of the example's rendered `/v1` URL. There is no run endpoint, no shell and no
 `subprocess`, and the API validates every parameter exactly as it does for any other client.
 The browser is mounted only by `gcpe docs`, which binds 127.0.0.1 as `serve` does: every

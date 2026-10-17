@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>gcpe capabilities</title>
+  <link rel="stylesheet" href="/docs/static/docs.css">
+  <script src="/docs/static/docs.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/">gcpe <span>capabilities</span></a>
+    <div class="session" id="session" aria-live="polite">Reading credentials…</div>
+    <form class="scope" id="scope-form" autocomplete="off">
+      <label for="scope">Scope</label>
+      <input id="scope" name="scope" list="projects" spellcheck="false"
+             placeholder="projects/… · folders/… · organizations/…">
+      <datalist id="projects"></datalist>
+      <button type="submit">Apply</button>
+      <small id="scope-status" class="muted"></small>
+    </form>
+  </header>
+  <div id="banner" class="banner" hidden></div>
+  <div class="layout">
+    <nav id="nav" aria-label="Capabilities"></nav>
+    <main id="main"><p class="muted">Loading the catalogue…</p></main>
+  </div>
+</body>
+</html>

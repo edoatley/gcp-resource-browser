@@ -309,5 +309,5 @@ curl 'http://127.0.0.1:8000/v1/resources?scope=projects/ace-gcp-training' \
     | jq '{count, suppressed, suppressed_summary}'
 curl 'http://127.0.0.1:8000/v1/resources?scope=projects/ace-gcp-training&show_all=true' \
     | jq '{count, suppressed}'
-open http://127.0.0.1:8000/docs
+open http://127.0.0.1:8000/api/docs
 ```

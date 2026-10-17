@@ -54,6 +54,18 @@ class Example:
     id: str
     title: str
     args: Mapping[str, str | bool | Sequence[str]] = field(default_factory=dict)
+    # Scope levels the example can run against (`projects`, ...); empty means
+    # any. Lets a renderer say why an example is unavailable for a scope,
+    # rather than offering a call the API is certain to reject.
+    scope_levels: Sequence[str] = ()
+
+    def unavailable_for(self, scope: str) -> str | None:
+        """Why this example cannot run against `scope`, or None if it can."""
+        level = scope.split("/", 1)[0]
+        if self.scope_levels and level not in self.scope_levels:
+            allowed = " or ".join(f"{lvl}/" for lvl in self.scope_levels)
+            return f"Runs only against {allowed} scopes, not {level}/."
+        return None
 
 
 @dataclass(frozen=True)
@@ -136,7 +148,11 @@ CAPABILITIES: tuple[Capability, ...] = (
         cli_command=None,
         docs=("docs/API.md#get-v1resourcesstream",),
         examples=(
-            Example("vms", "Every VM, one JSON object per line", {"scope": SCOPE, "type": ["vm"]}),
+            Example(
+                "everything",
+                "Everything in the scope, one JSON object per line",
+                {"scope": SCOPE},
+            ),
         ),
     ),
     Capability(
@@ -167,7 +183,12 @@ CAPABILITIES: tuple[Capability, ...] = (
             Example("high", "Predefined roles at high risk"),
             Example("medium", "Predefined roles at medium risk or above", {"risk": "medium"}),
             # A folder scope is rejected here: custom roles cannot live on one.
-            Example("custom", "Including custom roles defined on the scope", {"scope": SCOPE}),
+            Example(
+                "custom",
+                "Including custom roles defined on the scope",
+                {"scope": SCOPE},
+                scope_levels=core.CUSTOM_ROLE_LEVELS,
+            ),
         ),
     ),
     Capability(
@@ -219,6 +240,7 @@ CAPABILITIES: tuple[Capability, ...] = (
 EXCLUDED_CLI_COMMANDS: Mapping[str, str] = {
     "openapi": "Writes a file; development tooling, not a capability",
     "serve": "Starts the server the catalogue runs on",
+    "docs": "Starts the browser that renders this catalogue",
 }
 
 BY_ID: Mapping[str, Capability] = {c.id: c for c in CAPABILITIES}
@@ -230,7 +252,7 @@ BY_ID: Mapping[str, Capability] = {c.id: c for c in CAPABILITIES}
 # describes, and neither should need the catalogue to import.
 
 
-def _route_endpoint(path: str) -> APIRoute:
+def route_for(path: str) -> APIRoute:
     from app.api import app
 
     for route in app.routes:
@@ -251,7 +273,7 @@ def _cli_callback(name: str) -> Callable:
 
 def purpose(capability: Capability) -> str:
     """The one-line purpose, from the route's own summary."""
-    return _route_endpoint(capability.route).summary or ""
+    return route_for(capability.route).summary or ""
 
 
 def _help_name(text: str) -> str | None:
@@ -270,7 +292,7 @@ def _help_name(text: str) -> str | None:
 def params(capability_id: str) -> tuple[Param, ...]:
     """A capability's inputs, paired across the surfaces by their shared Help text."""
     capability = BY_ID[capability_id]
-    endpoint = _route_endpoint(capability.route).endpoint
+    endpoint = route_for(capability.route).endpoint
 
     cli_by_help: dict[str, tuple[str | None, bool]] = {}
     if capability.cli_command:

@@ -170,3 +170,27 @@ def test_billing_helper_emits_sorted_tsv_and_warns_about_unclassified(monkeypatc
     assert captured.out.splitlines() == [f"{prefix}\t{agent}", f"{prefix}\tuser:a@x.com"]
     assert "organizations/1/roles/odd" in captured.err
     core._ROLE_CATALOGUE.clear()
+
+
+def test_projects_helper_emits_sorted_tsv(monkeypatch, capsys) -> None:
+    from scripts import _explorer_projects
+    from tests.conftest import FakeResponse, FakeRestSession
+
+    core._VISIBLE_PROJECTS.clear()
+    session = FakeRestSession(
+        {
+            "projects:search": FakeResponse(
+                {
+                    "projects": [
+                        {"name": "projects/2", "projectId": "zeta"},
+                        {"name": "projects/1", "projectId": "alpha"},
+                    ]
+                }
+            )
+        }
+    )
+    monkeypatch.setattr(core, "get_rest_session", lambda: session)
+
+    assert _explorer_projects.main() == 0
+    assert capsys.readouterr().out.splitlines() == ["alpha\t1", "zeta\t2"]
+    core._VISIBLE_PROJECTS.clear()

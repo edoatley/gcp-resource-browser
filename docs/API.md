@@ -13,12 +13,16 @@ uv run gcpe serve --host 0.0.0.0 --port 9000
 | Where | What |
 |:---|:---|
 | **[edoatley.github.io/gcp-resource-browser](https://edoatley.github.io/gcp-resource-browser/)** | Browsable reference, no server needed. Published from `main` by `.github/workflows/pages.yml`. Read-only. |
-| `http://127.0.0.1:8000/docs` | Swagger UI on a running server, with **Try it out** against your real estate |
-| `http://127.0.0.1:8000/redoc` | The same spec rendered with ReDoc |
+| `http://127.0.0.1:8000/api/docs` | Swagger UI on a running server, with **Try it out** against your real estate. `/docs` redirects here. |
+| `http://127.0.0.1:8000/api/redoc` | The same spec rendered with ReDoc |
 | `http://127.0.0.1:8000/openapi.json` | The live schema |
 | [`openapi.yml`](../openapi.yml) | The committed spec, for code generation. CI fails if it differs from the code. |
 
 Regenerate it after changing the API with `uv run gcpe openapi --out openapi.yml`.
+
+Swagger moved from `/docs` to `/api/docs` in Phase 9, so that `/docs` could be the capability
+browser. That browser is served only by `gcpe docs`, never by `gcpe serve` (see the
+[CLI guide](CLI.md#browsing-every-capability)). On a server, `/docs` is a redirect to Swagger.
 
 ## Endpoints
 

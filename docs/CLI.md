@@ -25,6 +25,7 @@ command.
 | `grants SCOPE` | Find principals holding risky roles across a scope |
 | `billing-grants` | Find principals holding risky roles on a billing account |
 | `serve` | Run the [HTTP API](API.md) (`--host`, `--port`; default `127.0.0.1:8000`) |
+| `docs` | Open the capability browser locally (`--host`, `--port`, `--no-browser`) |
 | `openapi` | Write the API's OpenAPI spec (`--out`, default `openapi.yml`) |
 
 ## Searching
@@ -247,6 +248,34 @@ gcpe search organizations/123 --type bucket --cache-ttl 60
 
 Caching is off by default. It only helps within one process, so it matters for `serve` more
 than for one-off CLI runs. See [Concepts → caching](CONCEPTS.md#caching).
+
+## Browsing every capability
+
+```bash
+uv run gcpe docs                 # opens http://127.0.0.1:8000/docs
+uv run gcpe docs --no-browser --port 8080
+```
+
+A page per capability. Each one has:
+
+- a purpose line, and the parameters with their CLI flag and API name side by side;
+- examples written for **your** scope, each as a `gcpe` command, an API URL and the `gcloud`
+  equivalent, with a copy button;
+- a **Call API** button that runs the example against the API, whichever tab is showing, and
+  shows the result inline. Its caveats (truncation, hidden rows, coverage) appear verbatim, and
+  the response itself is under **Raw JSON**, with Copy and "Open in new tab".
+
+The header shows who you are signed in as and the project calls bill to. The scope starts as
+your ADC default project. The picker lists every project you can see (one Resource Manager
+call; it needs `cloudresourcemanager.googleapis.com` on the quota project). You can type a
+`folders/…` or `organizations/…` scope instead.
+
+Call API makes **real, read-only** calls as you. That is why the browser is local only: it binds
+`127.0.0.1` by default, warns if you bind anything else, and `gcpe serve` does not include it.
+The page loads nothing from the internet; the doc links open GitHub.
+
+The examples come from `app/capabilities.py`, and the tests check that every one runs and
+that its gcloud form matches `--show-gcloud`, so the page cannot drift from the tool.
 
 ## Exit codes
 

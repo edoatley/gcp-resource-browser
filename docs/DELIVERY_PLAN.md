@@ -636,7 +636,7 @@ a user holding Owner, deploy service accounts holding Service Account User at pr
 
 ---
 
-## Phase 9 — `gcpe docs`, an interactive capability browser ☐
+## Phase 9 — `gcpe docs`, an interactive capability browser ◐
 
 **Goal:** one place that answers "what can this thing do?". Phase 8 took the tool to 9 CLI
 commands and 7 endpoints, documented across six markdown files plus generated Swagger — enough
@@ -645,24 +645,31 @@ that its own author lost track of the surface area. That is the trigger for this
 Written up as a pickup-ready item in
 [`docs/todo/gcpe-docs-capability-browser.md`](todo/gcpe-docs-capability-browser.md).
 
-- ☐ `app/capabilities.py` — a declarative catalogue of every capability: purpose, CLI form,
-  API equivalent, and a runnable example, reusing `Help` and `ASSET_TYPES` rather than
-  restating them.
-- ☐ A test asserting every CLI command and every route appears in the catalogue, so a new
-  capability cannot be added without listing it. This is the same staleness guard CI already
-  applies to `openapi.yml` and `CLI_REFERENCE.md`.
-- ☐ `GET /guide` (not `/docs` — FastAPI's Swagger UI already owns that) rendering the
-  catalogue, with a Run button per example.
+- ☑ `app/capabilities.py` — a declarative catalogue of every capability. It holds:
+  - the purpose (the route's summary);
+  - parameters, derived from both signatures and paired by shared `Help` text;
+  - structured examples, each rendered as a `gcpe` command, a `/v1` URL and `gcloud`.
+- ☑ `tests/test_capabilities.py` — every CLI command and `/v1` route must be catalogued or
+  excluded. Every example must run on both surfaces, and its gcloud form must match
+  `--show-gcloud`. This is the same staleness guard CI already applies to `openapi.yml` and
+  `CLI_REFERENCE.md`.
+- ☐ `GET /docs`, rendering the catalogue: one page per capability, with copyable
+  CLI / API / gcloud forms and an inline "Try it" per example. Swagger moves to `/api/docs`.
+  On `gcpe serve`, `/docs` redirects there.
+- ☐ Session context in place of placeholders:
+  - principal, ADC quota project and default project, all read locally;
+  - a lazy scope picker from one Resource Manager `projects.search` call.
 - ☐ `gcpe docs` to launch it, following `serve`'s pattern of running uvicorn against the same
   app.
 
 ### Executing from a page, safely
 
-The page must never execute a user-supplied string. It posts a catalogue **id**, and the
-server dispatches to the mapped `core` function in-process — no shell, no `subprocess`. The
-only free text is the scope, which already goes through `core.validate_scope`. Binding stays
-on 127.0.0.1 by default, as `serve` does, because every example runs a real read-only call
-against a real estate and bills the ADC quota project.
+The page never executes a string. Every capability is already a read-only `GET`, so "Try it"
+is a `fetch` of the example's rendered `/v1` URL. There is no run endpoint, no shell and no
+`subprocess`, and the API validates every parameter exactly as it does for any other client.
+The browser is mounted only by `gcpe docs`, which binds 127.0.0.1 as `serve` does: every
+example runs a real call against a real estate and bills the ADC quota project. A deployed
+`serve` never exposes the session context.
 
 ### Why the catalogue comes before the page
 

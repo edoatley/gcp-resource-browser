@@ -96,6 +96,10 @@ the user runs `gcloud auth application-default login` first. This is a deliberat
 - `app/gcloud.py` — renders a search as its `gcloud` equivalent for `--show-gcloud`. It reuses
   the tool's compiled query, so it is a convenience and **not** a correctness check; that stays
   with the independent `scripts/gcloud-search-resources.sh`. Pin exact strings in tests.
+- `app/capabilities.py` — the capability catalogue behind Phase 9's browser. Examples are
+  structured and rendered to CLI, URL and gcloud; parameters are derived from both signatures
+  via shared `Help` text. `tests/test_capabilities.py` fails if a command or `/v1` route is
+  added without cataloguing it, or if an example stops running.
 - `app/fanout.py` — bounded concurrent search across several scopes.
 - `app/cache.py` — opt-in TTL cache, inert unless a caller sets a TTL.
 - `app/params.py` — `SearchFilters` (what a search takes) and `Help` (how each filter is

@@ -1,85 +1,128 @@
 # `gcpe docs` — interactive capability browser
 
-**Summary:** A local browser page, launched by `gcpe docs`, that lays out every capability the
-tool has with a runnable example per capability — so you can see what it does without
-reconstructing it from six markdown files.
+**Summary:** A local browser page at `/docs`, launched by `gcpe docs`, with one page per
+capability. Each page shows copyable CLI / API / gcloud forms of every example, filled in with
+the logged-in session's real scope rather than placeholders, and a "Try it" button that shows
+the result inline.
 
-**Origin:** Phase 8 (merged in #2, `54b1a89`) added `roles`, `grants` and `billing-grants`,
-taking the tool to 9 CLI commands and 7 endpoints. That growth is what prompted this. Branch
-fresh from `main`.
+**Origin:** Phase 8 (#2, `54b1a89`) took the tool to 9 CLI commands and 7 endpoints. The design
+below was settled in a planning review on 2026-10-17. The first half, the catalogue
+(`app/capabilities.py` + `tests/test_capabilities.py`), shipped on its own as PR 1 of 2. This
+handoff is the second half. Branch fresh from `main`.
 
 ## Why deferred
 
-Raised while finishing Phase 8; the PR was already large. It is also a new kind of surface for
-this codebase (a served HTML page that executes things), so it deserves its own review rather
-than riding along with an IAM feature.
+The catalogue is the valuable, drift-proof half and was reviewable alone. The page is a new
+kind of surface for this codebase (served HTML plus JS, and a new GCP call for the scope
+picker), so it gets its own review.
 
 ## Context
 
 **Relevant files:**
-- `app/cli.py` — 9 commands. `serve` already runs uvicorn against the FastAPI app, so CLI and
-  API are one process; `docs` would follow that pattern.
-- `app/api.py` — 7 endpoints. **Note `/docs` is already FastAPI's Swagger UI** — pick another
-  route, e.g. `/guide`.
-- `app/params.py` — `Help`, `SearchFilters`, `GrantFilters`, `BillingGrantFilters`,
-  `SORTABLE_FIELDS`. The authoritative descriptions already live here.
-- `docs/WALKTHROUGH.md` (313 lines) and the numbered walkthrough in `README.md` — two existing
-  hand-maintained example sets that a catalogue could eventually generate.
-- `docs/CLI.md`, `docs/API.md`, `docs/CONCEPTS.md` — the prose this page summarises, not replaces.
+- `app/capabilities.py` — **already built.** `CAPABILITIES`, `params(id)`, `purpose(cap)`,
+  `to_cli` / `to_url` / `to_gcloud(cap, example, scope, billing_project)`. The page is a
+  renderer over this. Do not restate anything it derives.
+- `app/api.py` — `FastAPI(...)` currently leaves Swagger at the default `/docs`.
+- `app/cli.py` — `serve` runs `uvicorn.run("app.api:app", ...)`. `docs` follows that pattern.
+- `app/core.py` — `adc_quota_project()` reads local credentials with no network call.
+  `get_rest_session()`, `_paginate` and `_rest_error` are how a new Google REST API is added
+  (see `docs/ARCHITECTURE.md`, "Adding a Google REST API").
+- `app/gcloud.py` — renderers already reused by `to_gcloud`.
 
-**Current state:**
-Capabilities are documented across `README.md`, `docs/CLI.md`, `docs/API.md`,
-`docs/CONCEPTS.md`, `docs/CLI_REFERENCE.md` (generated) and `docs/WALKTHROUGH.md`. Swagger at
-`/docs` covers the API endpoint-by-endpoint, with no CLI and no narrative. There is no single
-place that answers "what can this thing do?", and nothing executable.
+**Decisions already made (do not reopen without the user):**
+
+| Topic | Decision |
+|---|---|
+| Route | Browser at `/docs`. Swagger moves to `/api/docs`, ReDoc to `/api/redoc` |
+| Deployed | Local only. `gcpe docs` mounts the browser and `gcpe serve` does not. On serve, `/docs` returns 307 to `/api/docs` |
+| Page unit | One page per capability (`CAPABILITIES`), grouped by `THEMES` in a left nav |
+| Clicking | Plain GET: "Try it" `fetch`es `to_url(...)` and renders inline. **No run/POST endpoint** |
+| Forms | CLI / API / gcloud tabs, each with a copy button |
+| Prose | Purpose, the `params()` table, standing caveats, and links to `Capability.docs`. No restated prose |
+| Context | Eager and local: principal, quota project, default project. Lazy: a scope picker from one Resource Manager `projects.search` call |
 
 **Key constraints:**
-- **Never execute a user-supplied string.** The page posts an example *id* from a fixed
-  server-side catalogue; the server calls `app.core` in-process. No shell, no `subprocess`,
-  no eval. The only free-text input is the scope, which already goes through
-  `core.validate_scope`.
-- **Bind 127.0.0.1 by default**, as `serve` does. This page runs searches against a real estate.
-- **One authoritative source per fact** (see the Interlude phase in the delivery plan). The
-  catalogue must reuse `Help`, `ASSET_TYPES` and `SORTABLE_FIELDS` rather than restating them.
-  `tests/test_params.py` already enforces this pattern for help strings.
-- **It must not go stale.** CI diffs regenerated `openapi.yml` and `CLI_REFERENCE.md`; this
-  needs the equivalent — a test that every CLI command and every route appears in the
-  catalogue, so adding a capability without listing it fails the build.
-- Read-only capabilities only. Exclude `openapi` (writes a file) and `serve`.
+- The page never executes a string. It only fetches URLs the catalogue rendered, and the API
+  validates them as it would for any client.
+- No CDN or external requests. CSS and JS are vendored under `app/static/docs/`, and a test
+  greps them for `http`.
+- `/healthz` stays I/O-free. Session and picker endpoints are docs-only and excluded from the
+  OpenAPI schema (`include_in_schema=False`), so `openapi.yml` doesn't change for them.
+- The picker's project list is a picker, not an audit answer. Cache it per process. This is a
+  narrow exception to "cache off", and the code should say why.
+- `projects.search` is one paginated call, not a per-project walk. With no organization
+  (the dev estate has none), CAI has no scope that could list projects, so Resource Manager is
+  the only route.
 
 ## What to do
 
-1. New module `app/capabilities.py`: a declarative catalogue — id, title, one-line purpose,
-   the CLI form, the equivalent API call, and a runnable example referencing `Help.*`. Group
-   by theme (search · filtering · aggregation · IAM risk · output · operations).
-2. Test: assert every `cli` command name and every `app.routes` path appears in the catalogue.
-   This is the staleness guard, and the reason to build the catalogue before the page.
-3. `GET /guide` returns the page; `GET /v1/capabilities` returns the catalogue as JSON.
-   `POST /v1/capabilities/{id}/run` takes `{scope}`, dispatches to the mapped `core` function,
-   and returns the result plus the rendered command string for copying.
-4. Self-contained HTML/CSS/JS — no CDN. Capability cards, a scope box at the top, a **Run**
-   button per example, result rendered inline, and a copy button for the CLI form.
-5. `gcpe docs [--host --port --no-browser]`: starts uvicorn and opens a browser at `/guide`.
-6. Make the page say plainly that Run executes a real read-only call against the configured
-   scope and bills the ADC quota project.
-7. Docs: `README.md` index, `docs/CLI.md`, `docs/API.md`, `docs/ARCHITECTURE.md` (why the
-   catalogue is the source of truth), and regenerate the two generated files.
+1. **Swagger move.** Set `FastAPI(docs_url="/api/docs", redoc_url="/api/redoc")` in
+   `app/api.py`, and add a `/docs` → `/api/docs` 307 for the serve app.
+2. **`app/docs_site.py`.** `mount_docs(app)` adds an `APIRouter(include_in_schema=False)`
+   that replaces the redirect, with:
+   - `GET /docs`, the HTML shell;
+   - `/docs/static/*`;
+   - `GET /docs/_/catalogue?scope=`: capabilities, `params`, and each example's three forms
+     rendered for that scope, with `billing_project=core.adc_quota_project()`;
+   - `GET /docs/_/session`;
+   - `GET /docs/_/projects`.
+3. **`core.session_context()`.** Returns:
+   - credential type;
+   - principal: the service account for impersonated or SA credentials, and for user
+     credentials one best-effort, cached tokeninfo call;
+   - quota project;
+   - the ADC default project.
 
-Suggested start: steps 1 and 2 alone are useful — a tested catalogue nothing can drift from.
-The page is then a renderer over it.
+   It must never raise: if ADC is missing it returns the error, the page shows a
+   `gcloud auth application-default login` banner, and the placeholders remain.
+4. **`core.list_visible_projects()`.** Resource Manager v3 `projects:search` via
+   `get_rest_session` and `_paginate`, translated with `_rest_error`. The `remedy` names
+   `cloudresourcemanager.googleapis.com` on the quota project and the
+   `resourcemanager.projects.get` permission. Return id, number and display name.
+   - Add `scripts/gcloud-list-projects.sh` (`gcloud projects list --format=json`) and a
+     comparison against the tool's list, per the "every capability ships with a gcloud
+     equivalent" rule.
+5. **The page** (`app/static/docs/index.html`, `docs.js`, `docs.css`), in vanilla JS with
+   hash routing (`#/grants`).
+   - Header: principal, quota project, and a scope `<input list>` filled lazily from the
+     picker. Free text `folders/…` and `organizations/…` is allowed. Changing scope
+     re-fetches the catalogue.
+   - A standing note that Try it makes a real, read-only call billed to the quota project.
+   - Each "Try it" result panel shows `truncated`, `suppressed_summary`, `query`, `iam_note`
+     and `coverage_note` verbatim, plus an "open raw" link. The stream example reads NDJSON
+     incrementally.
+   - The `roles:custom` example is rejected for folder scopes. Disable it with the reason
+     rather than letting it 400.
+6. **`gcpe docs [--host 127.0.0.1] [--port 8000] [--no-browser]`.** Build the app, call
+   `mount_docs`, `uvicorn.run(app_obj, ...)`, and open `/docs` with `webbrowser`. Add
+   `"docs"` to `capabilities.EXCLUDED_CLI_COMMANDS` with a reason, or the staleness test fails.
+7. **Docs.**
+   - `README.md` index and status note.
+   - `docs/CLI.md` (`gcpe docs`).
+   - `docs/API.md` (Swagger is now at `/api/docs`).
+   - `docs/DEPLOYMENT.md` (the browser is local-only).
+   - Tick the boxes in `DELIVERY_PLAN.md`.
+   - Regenerate `openapi.yml` and `docs/CLI_REFERENCE.md`.
+   - Delete this file.
 
 ## Acceptance criteria
 
-- [ ] `gcpe docs` opens a page listing every capability, grouped, each with a purpose line
-- [ ] Each example runs on click and renders its result inline, without a page reload
-- [ ] Adding a CLI command or route without adding it to the catalogue fails a test
-- [ ] No endpoint accepts a command, path or query string to execute — only a catalogue id
+- [ ] `gcpe docs` opens `/docs`, listing every catalogued capability grouped by theme
+- [ ] Every example shows CLI, API and gcloud forms with the real scope, each copyable
+- [ ] Try it renders inline without a reload and shows the response's caveat fields verbatim
+- [ ] `gcpe serve`: `/docs` is a 307 to `/api/docs`, and `/docs/_/*` returns 404
+- [ ] No `/docs/_/*` path appears in `openapi.yml`
 - [ ] The page loads with no external network requests
-- [ ] Examples reuse `Help.*` rather than restating descriptions
-- [ ] `uv run pytest`, `ruff check`, and both staleness checks pass
+- [ ] With ADC missing, the page still loads and says how to log in
+- [ ] A `SERVICE_DISABLED` from the picker is reported as such, and the picker falls back to
+      free text
+- [ ] **Live, before ticking:** on the dev estate, the picker lists all 7 projects and agrees
+      with `scripts/gcloud-list-projects.sh`, and every example's Try it result agrees with its
+      pasted CLI and gcloud forms
+- [ ] `uv run pytest`, `ruff`, and both staleness checks pass
 
 ## Related specs / docs
 
-- [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md) — extension checklists; both surfaces stay thin
-- [`docs/DELIVERY_PLAN.md`](../DELIVERY_PLAN.md) — Interlude, "One authoritative source per fact"
-- [`docs/WALKTHROUGH.md`](../WALKTHROUGH.md) — existing example set the catalogue could generate
+- `app/capabilities.py`, `tests/test_capabilities.py` — the catalogue this renders
+- [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md) — "The capability catalogue", "Adding a Google REST API"
+- [`docs/DELIVERY_PLAN.md`](../DELIVERY_PLAN.md) — Phase 9

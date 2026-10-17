@@ -49,6 +49,7 @@ core so the two surfaces cannot drift apart.
 | `app/output.py` | JSON and CSV emitters for the CLI. |
 | `app/role_risk.py` + `role_risk_rules.json` | Which permissions make a role risky, with cited sources. Pure; `core` does the I/O. |
 | `app/gcloud.py` | Renders a search as the equivalent `gcloud asset` command (`--show-gcloud`). |
+| `app/capabilities.py` | The capability catalogue: every capability with runnable examples, each rendered as a `gcpe` command, a `/v1` URL and `gcloud`. See [below](#the-capability-catalogue). |
 | `app/models.py` | Pydantic wire models: `Resource`, `ResourceList`, `Summary`, `ErrorResponse`. These also produce the OpenAPI schema. |
 | `app/asset_types.json` | Friendly name → CAI asset type. Also read by `scripts/` with `jq`. |
 | `app/cli.py`, `app/api.py` | The two surfaces. |
@@ -165,6 +166,30 @@ already concurrent. Converting to `async` would turn the core into coroutines an
 `asyncio.run` through the whole CLI. Phase 7 of the delivery plan lists the measured conditions
 that would justify that change.
 
+## The capability catalogue
+
+`app/capabilities.py` answers "what can this tool do?" in one place, and is what the `gcpe docs`
+browser (Phase 9) renders. It is declarative and deliberately thin: it lists capabilities and
+their examples, and derives everything else from the code that implements them.
+
+- **Purpose lines** are each route's `summary`.
+- **Parameters** are read from the route and CLI command signatures, and paired across the
+  two surfaces by the `Help` string they share. That is the same pairing
+  `tests/test_params.py` enforces, so the catalogue restates no flag name and no description.
+- **Examples** are structured data keyed by API parameter name (`{"type": ["bucket"]}`), with
+  `SCOPE` substituted at render time. One spec renders three ways: `to_cli`, `to_url`, and
+  `to_gcloud`. `to_gcloud` uses the same pure compilation steps as the core and the same
+  renderers as `--show-gcloud`, without making a call. That is why examples may not use
+  `project`: resolving a project ID is itself a CAI call.
+
+`tests/test_capabilities.py` is the staleness guard. It fails when:
+
+- a CLI command or `/v1` route is neither catalogued nor listed in `EXCLUDED_CLI_COMMANDS`;
+- a parameter has no shared `Help` text;
+- a docs link points at a heading that no longer exists;
+- an example stops running through `TestClient` or `CliRunner`;
+- an example's gcloud form differs from what `--show-gcloud` prints for the same arguments.
+
 ## Extending
 
 ### Adding a resource type
@@ -192,6 +217,8 @@ once. Sites can do the same without a code change through
 6. Add the `gcloud` equivalent to `scripts/gcloud-search-resources.sh`.
 7. Regenerate `openapi.yml` and `docs/CLI_REFERENCE.md`, and update the parameter tables in
    [API](API.md) and [Concepts](CONCEPTS.md).
+8. Consider an example in `app/capabilities.py`. Its parameter table picks the filter up on
+   its own, as long as both surfaces use the shared `Help` text.
 
 The CLI and API keep separate function signatures on purpose. FastAPI and Typer both build
 their output (the OpenAPI schema, `--help`) by inspecting the signature, so merging them into
@@ -217,6 +244,12 @@ instead of guessing at the cause.
 
 Sites can add rules without a code change via `role_risk_rules` in
 [configuration](CONFIGURATION.md); a site rule replaces a default for the same permission.
+
+### Adding a command or endpoint
+
+Add a `Capability` to `app/capabilities.py` with at least one `Example`, or add the command to
+`EXCLUDED_CLI_COMMANDS` with a reason. `tests/test_capabilities.py` fails until you do. A new
+gcloud form also needs a branch in `capabilities.to_gcloud`.
 
 ### Adding a Google REST API
 

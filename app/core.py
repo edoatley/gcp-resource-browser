@@ -35,6 +35,8 @@ from app.models import (
     RiskyPermission,
     RiskyRole,
     RoleList,
+    SessionContext,
+    VisibleProject,
 )
 from app.noise import NoiseFilter
 from app.params import (
@@ -1146,3 +1148,126 @@ def search_billing_grants(filters: BillingGrantFilters, session=None) -> Billing
         grants=grants,
         groups=group_grants(grants, filters.group_by) if filters.group_by else None,
     )
+
+
+# --- Session context and visible projects (the `gcpe docs` browser) ---------
+#
+# Both exist so the browser can show the logged-in session's real scope rather
+# than a placeholder. Neither is reachable from `gcpe serve`.
+
+TOKENINFO_URL = "https://oauth2.googleapis.com/tokeninfo"
+
+# Credential class module -> how to describe it to a person.
+_CREDENTIAL_TYPES = {
+    "google.oauth2.credentials": "user",
+    "google.oauth2.service_account": "service account",
+    "google.auth.impersonated_credentials": "impersonated service account",
+    "google.auth.compute_engine.credentials": "compute engine metadata server",
+    "google.auth.identity_pool": "workload identity federation",
+    "google.auth.external_account": "workload identity federation",
+}
+
+
+def _user_email(credentials) -> str | None:
+    """A user credential's email, from one tokeninfo call. Raises on failure.
+
+    User credentials carry no email locally. tokeninfo is an OAuth endpoint,
+    not a Google Cloud API: it costs no quota and needs no API enabled.
+    """
+    from google.auth.transport.requests import AuthorizedSession, Request
+
+    credentials.refresh(Request())
+    response = AuthorizedSession(credentials).get(
+        TOKENINFO_URL, params={"access_token": credentials.token}, timeout=5
+    )
+    response.raise_for_status()
+    return response.json().get("email")
+
+
+@lru_cache(maxsize=1)
+def session_context() -> SessionContext:
+    """The identity, quota project and default project this process runs as.
+
+    Never raises: the browser must still load, and say how to log in, when ADC
+    is missing. Everything is read locally except a user credential's email,
+    which costs one best-effort tokeninfo call. Cached for the process, since
+    the credentials cannot change underneath it.
+    """
+    try:
+        credentials, project = google.auth.default(
+            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+        )
+    except Exception as exc:  # noqa: BLE001 - reported, never fatal
+        return SessionContext(error=f"{type(exc).__name__}: {exc}")
+
+    kind = _CREDENTIAL_TYPES.get(type(credentials).__module__, type(credentials).__name__)
+    principal = getattr(credentials, "service_account_email", None)
+    note = None
+    if principal in (None, "default"):
+        principal = None
+        try:
+            principal = _user_email(credentials)
+        except Exception as exc:  # noqa: BLE001 - best-effort display detail
+            note = f"Could not read the principal: {type(exc).__name__}: {exc}"
+        if principal is None and note is None:
+            note = "The credential does not expose an email address."
+
+    return SessionContext(
+        credential_type=kind,
+        principal=principal,
+        principal_note=note,
+        quota_project=getattr(credentials, "quota_project_id", None),
+        default_project=project,
+    )
+
+
+RESOURCE_MANAGER_URL = "https://cloudresourcemanager.googleapis.com/v3"
+RESOURCE_MANAGER_SERVICE = "cloudresourcemanager.googleapis.com"
+
+# The scope picker's list, cached briefly. A deliberate, narrow exception to
+# "cache off": it fills a dropdown, it never answers an audit question, and a
+# page that re-listed every project on each keystroke would be slow for a
+# caller who can see thousands.
+_VISIBLE_PROJECTS = TTLCache(ttl_seconds=300)
+
+_PROJECTS_REMEDY = (
+    ". Listing projects needs resourcemanager.projects.get on them (roles/browser grants "
+    "it), and cloudresourcemanager.googleapis.com enabled on the project this request "
+    "bills to."
+)
+
+
+def list_visible_projects(session=None) -> list[VisibleProject]:
+    """Every active project the caller can see, for the browser's scope picker.
+
+    One paginated Resource Manager search, not a per-project walk. CAI cannot
+    answer this without a scope above the projects, and an estate with no
+    organization has none.
+    """
+    if (cached := _VISIBLE_PROJECTS.get("projects")) is not None:
+        return cached
+
+    raw = _paginate(
+        session or get_rest_session(),
+        f"{RESOURCE_MANAGER_URL}/projects:search",
+        {},
+        key="projects",
+        what="Project listing",
+        service=RESOURCE_MANAGER_SERVICE,
+        remedy=_PROJECTS_REMEDY,
+    )
+    projects = sorted(
+        (
+            VisibleProject(
+                project_id=p["projectId"],
+                number=p["name"].removeprefix("projects/"),
+                display_name=p.get("displayName"),
+            )
+            for p in raw
+            # Projects pending deletion are listed too; they cannot be searched.
+            if p.get("state", "ACTIVE") == "ACTIVE"
+        ),
+        key=lambda p: p.project_id,
+    )
+    _VISIBLE_PROJECTS.put("projects", projects)
+    return projects

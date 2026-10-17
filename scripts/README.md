@@ -15,6 +15,8 @@ except `setup-gcp.sh`.
 | `gcloud-list-roles.sh` / `_explorer_roles.py` | The two sides of `compare-roles.sh`, as sorted `risk<TAB>role` lines |
 | `compare-billing-grants.sh` | Diff `gcpe billing-grants --show-all` against gcloud's reading of the Cloud Billing API |
 | `gcloud-billing-grants.sh` / `_explorer_billing_grants.py` | The two sides of `compare-billing-grants.sh`, as sorted `resource<TAB>role<TAB>member` lines |
+| `compare-projects.sh` | Diff the `gcpe docs` scope picker (Resource Manager v3 search) against `gcloud projects list` (v1) |
+| `gcloud-list-projects.sh` / `_explorer_projects.py` | The two sides of `compare-projects.sh`, as sorted `project_id<TAB>number` lines |
 | `check-noise.sh` | Checks that the noise-suppressed result is a strict subset of the full result |
 | `benchmark.py` | Records a latency baseline for the delivery plan |
 

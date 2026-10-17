@@ -17,7 +17,8 @@ uv sync                                  # includes the dev group (pytest, ruff)
 uv run pytest                            # CAI client is faked; no network or creds needed
 uv run ruff check . && uv run ruff format .
 uv run gcpe list-resources projects/my-project bucket
-uv run gcpe serve                # FastAPI on http://127.0.0.1:8000 (docs at /docs)
+uv run gcpe serve                # FastAPI on http://127.0.0.1:8000 (Swagger at /api/docs)
+uv run gcpe docs                 # local capability browser at /docs (never part of serve)
 ```
 
 CI (`.github/workflows/ci.yml`) runs lint, format check, tests, staleness checks on
@@ -100,6 +101,9 @@ the user runs `gcloud auth application-default login` first. This is a deliberat
   structured and rendered to CLI, URL and gcloud; parameters are derived from both signatures
   via shared `Help` text. `tests/test_capabilities.py` fails if a command or `/v1` route is
   added without cataloguing it, or if an example stops running.
+- `app/docs_site.py` + `app/static/docs/` — the `gcpe docs` browser. It is a wrapper app that
+  routes its pages first and mounts the API app beneath, so "Call API" is a plain GET of a `/v1`
+  URL; never add an endpoint that executes something. Local only: `serve` must not mount it.
 - `app/fanout.py` — bounded concurrent search across several scopes.
 - `app/cache.py` — opt-in TTL cache, inert unless a caller sets a TTL.
 - `app/params.py` — `SearchFilters` (what a search takes) and `Help` (how each filter is
@@ -148,9 +152,9 @@ adding a resource type is a one-line change that lights up both surfaces.
 
 ## Not yet built
 
-Phases 0–3, 5, 6 and most of 8 are built. Still open: Phase 4's baseline measured on a real
+Phases 0–3, 5, 6, most of 8 and most of 9 are built. Still open: Phase 4's baseline measured on a real
 organisation, effective (inherited) IAM, Phase 8's group expansion, and the deliberately
-conditional Phase 7, and Phase 9 (`gcpe docs`). Deferred items that are not whole phases live
+conditional Phase 7, and live verification of Phase 9's scope picker. Deferred items that are not whole phases live
 in `docs/todo/`, one self-contained handoff each — check there before designing something that
 may already be specified.
 

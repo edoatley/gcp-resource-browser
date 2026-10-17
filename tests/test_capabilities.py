@@ -241,8 +241,25 @@ def test_scope_is_substituted_everywhere() -> None:
 
 
 def test_capabilities_without_a_form_say_so() -> None:
-    stream, example = _example("stream", "vms")
+    stream, example = _example("stream", "everything")
     assert caps.to_cli(stream, example, SCOPE) is None
     types, example = _example("types", "all")
     assert caps.to_gcloud(types, example, SCOPE) is None
     assert caps.to_url(types, example, SCOPE) == "/v1/types"
+
+
+def test_scope_levels_say_why_an_example_cannot_run() -> None:
+    _, example = _example("roles", "custom")
+
+    assert example.unavailable_for("projects/p") is None
+    assert example.unavailable_for("organizations/1") is None
+    assert example.unavailable_for("folders/1") == (
+        "Runs only against organizations/ or projects/ scopes, not folders/."
+    )
+
+
+def test_examples_with_no_scope_restriction_run_anywhere() -> None:
+    for capability in caps.CAPABILITIES:
+        for example in capability.examples:
+            if not example.scope_levels:
+                assert example.unavailable_for("folders/1") is None

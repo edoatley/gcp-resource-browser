@@ -7,6 +7,8 @@ and CI.
 
 from __future__ import annotations
 
+import threading
+import webbrowser
 from pathlib import Path
 
 import typer
@@ -709,3 +711,34 @@ def serve(
 ) -> None:
     """Run the FastAPI server."""
     uvicorn.run("app.api:app", host=host, port=port)
+
+
+# Hosts that only this machine can reach. Anything else exposes the browser.
+_LOOPBACK = ("127.0.0.1", "localhost", "::1")
+
+
+@cli.command("docs")
+def docs_command(
+    host: str = typer.Option("127.0.0.1", help="Address to bind"),
+    port: int = typer.Option(8000, help="Port to bind"),
+    no_browser: bool = typer.Option(False, "--no-browser", help="Do not open a browser"),
+) -> None:
+    """Open the interactive capability browser: every capability, with runnable examples.
+
+    Local only. The page shows who you are logged in as and runs real,
+    read-only searches as you, billed to your ADC quota project. `serve` does
+    not include it.
+    """
+    from app.docs_site import create_docs_app
+
+    url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '::') else host}:{port}/docs"
+    if host not in _LOOPBACK:
+        err_console.print(
+            f"[yellow]Warning:[/yellow] binding {host} lets anyone who can reach it see your "
+            "identity and run searches as you."
+        )
+    console.print(f"Capability browser at {url} (Ctrl+C to stop)")
+    if not no_browser:
+        # After a moment, so the server is listening before the page asks.
+        threading.Timer(1.0, webbrowser.open, args=[url]).start()
+    uvicorn.run(create_docs_app(), host=host, port=port)

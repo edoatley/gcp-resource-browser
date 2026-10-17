@@ -25,6 +25,7 @@ $ gcpe [OPTIONS] COMMAND [ARGS]...
 * `openapi`: Export the API&#x27;s OpenAPI specification.
 * `types`: List the friendly resource-type names this...
 * `serve`: Run the FastAPI server.
+* `docs`: Open the interactive capability browser:...
 
 ## `gcpe search`
 
@@ -231,4 +232,25 @@ $ gcpe serve [OPTIONS]
 
 * `--host <str>`: Address to bind  [default: 127.0.0.1]
 * `--port <int>`: Port to bind  [default: 8000]
+* `--help`: Show this message and exit.
+
+## `gcpe docs`
+
+Open the interactive capability browser: every capability, with runnable examples.
+
+Local only. The page shows who you are logged in as and runs real,
+read-only searches as you, billed to your ADC quota project. `serve` does
+not include it.
+
+**Usage**:
+
+```console
+$ gcpe docs [OPTIONS]
+```
+
+**Options**:
+
+* `--host <str>`: Address to bind  [default: 127.0.0.1]
+* `--port <int>`: Port to bind  [default: 8000]
+* `--no-browser`: Do not open a browser
 * `--help`: Show this message and exit.

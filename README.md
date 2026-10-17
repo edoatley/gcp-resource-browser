@@ -10,10 +10,10 @@ whole project, folder or organisation, with filters evaluated server-side.
 > JSON/CSV output, concurrent multi-scope search, streaming, and a container image with CI.
 > Phase 4's tuning is built but its baseline still needs measuring on a real organisation â€”
 > run `scripts/benchmark.py` there. Phase 8 adds high-risk role and grant review, covering
-> custom roles and billing-account IAM, all verified against a real estate. Phase 9 has begun:
-> a tested catalogue of every capability (`app/capabilities.py`) is in, and the `gcpe docs`
-> browser over it is next. That browser and Phase 8's group expansion are written up in
-> [`docs/todo/`](docs/todo/) and still to come. See the
+> custom roles and billing-account IAM, all verified against a real estate. Phase 9 adds
+> `gcpe docs`, a local page per capability with runnable examples for your own scope, built
+> over a tested catalogue (`app/capabilities.py`); its scope picker awaits live verification.
+> Phase 8's group expansion is written up in [`docs/todo/`](docs/todo/) and still to come. See the
 > [delivery plan](docs/DELIVERY_PLAN.md).
 
 ## Quickstart
@@ -31,6 +31,7 @@ uv run gcpe grants organizations/123 --by member             # who holds high-ri
 uv run gcpe billing-grants                                   # ... on a billing account
 
 uv run gcpe serve                                            # API on http://127.0.0.1:8000
+uv run gcpe docs                                             # browse every capability, runnable
 curl 'http://127.0.0.1:8000/v1/resources?scope=projects/my-project&type=bucket'
 ```
 
@@ -47,7 +48,8 @@ must be enabled on the ADC quota project. These are usually different projects â
 | [CLI guide](docs/CLI.md) | Using `gcpe`: recipes, output formats, exit codes |
 | [CLI reference](docs/CLI_REFERENCE.md) | Every command and flag (generated from the code) |
 | [HTTP API](docs/API.md) | Endpoints, parameters, response and error bodies |
-| [OpenAPI reference](https://edoatley.github.io/gcp-resource-browser/) | The API spec in Swagger UI, in the browser (also at `/docs` on a running server) |
+| `uv run gcpe docs` | A local page per capability, with copyable CLI / API / gcloud forms for your own scope and a **Call API** button ([CLI guide](docs/CLI.md#browsing-every-capability)) |
+| [OpenAPI reference](https://edoatley.github.io/gcp-resource-browser/) | The API spec in Swagger UI, in the browser (also at `/api/docs` on a running server) |
 | [Role risk](docs/ROLE_RISK.md) | Which roles count as high risk, and the quoted sources behind each rule |
 | [Configuration](docs/CONFIGURATION.md) | Site config: extra types, noise rules |
 | [Deployment](docs/DEPLOYMENT.md) | Container image, Cloud Run/GKE, health probes |
@@ -220,7 +222,8 @@ curl -s "http://127.0.0.1:8000/v1/grants?scope=$SCOPE&role_risk=high&group_by=me
 curl -s "http://127.0.0.1:8000/v1/billing-grants?role_risk=high" | jq '.grants, .unclassified_roles'
 ```
 
-Open <http://127.0.0.1:8000/docs> to explore and call every endpoint in your browser. The
+Open <http://127.0.0.1:8000/api/docs> to explore and call every endpoint in Swagger, or run
+`uv run gcpe docs` for a guided page per capability with the CLI and gcloud forms alongside. The
 same spec is [published online](https://edoatley.github.io/gcp-resource-browser/) as a
 read-only reference.
 

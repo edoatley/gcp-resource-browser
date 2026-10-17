@@ -45,8 +45,11 @@ say "APIs"
 # listing CUSTOM roles additionally needs iam.roles.list on the scope.
 # cloudbilling: `gcpe billing-grants` / GET /v1/billing-grants. Billing account
 # IAM is not in Cloud Asset Inventory, so it has to be read from its own API.
+# cloudresourcemanager: the `gcpe docs` scope picker (projects.search). CAI
+# cannot list projects without a scope above them, and there may be none.
 gcloud services enable cloudasset.googleapis.com iamcredentials.googleapis.com \
-  iam.googleapis.com cloudbilling.googleapis.com --project="$PROJECT_ID"
+  iam.googleapis.com cloudbilling.googleapis.com cloudresourcemanager.googleapis.com \
+  --project="$PROJECT_ID"
 
 say "Service account $SA_EMAIL"
 if gcloud iam service-accounts describe "$SA_EMAIL" --project="$PROJECT_ID" >/dev/null 2>&1; then

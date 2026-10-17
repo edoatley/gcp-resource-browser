@@ -260,3 +260,32 @@ class BillingGrantList(BaseModel):
     groups: list[GrantGroup] | None = Field(
         default=None, description="Present when group_by was requested"
     )
+
+
+# --- The `gcpe docs` browser --------------------------------------------------
+#
+# Served only by `gcpe docs`, never by `gcpe serve`, so these are not part of
+# the public API and are kept out of the OpenAPI schema.
+
+
+class SessionContext(BaseModel):
+    """Who the browser is running as, read from local credentials."""
+
+    credential_type: str | None = Field(
+        default=None, description="user, service account, impersonated service account, ..."
+    )
+    principal: str | None = Field(default=None, description="The identity calls are made as")
+    principal_note: str | None = Field(
+        default=None, description="Why the principal could not be determined, when it was not"
+    )
+    quota_project: str | None = Field(default=None, description="The project calls bill to")
+    default_project: str | None = Field(
+        default=None, description="The ADC default project, used as the starting scope"
+    )
+    error: str | None = Field(default=None, description="Set when ADC does not resolve at all")
+
+
+class VisibleProject(BaseModel):
+    project_id: str
+    number: str
+    display_name: str | None = None

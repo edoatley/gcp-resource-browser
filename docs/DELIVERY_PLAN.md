@@ -529,11 +529,11 @@ Administrator were the motivating examples.
   `gcpe billing-grants`, with `scripts/compare-billing-grants.sh` — matching on all three
   real-estate checks run (high, medium, and `--member-type user`). Needs `roles/billing.viewer`
   and `cloudbilling.googleapis.com` on the quota project.
-- ◐ **Custom roles in `/v1/roles`.** `?scope=` / `gcpe roles --scope` lists the custom roles
+- ☑ **Custom roles in `/v1/roles`.** `?scope=` / `gcpe roles --scope` lists the custom roles
   defined on an organization or project alongside the predefined catalogue, classified by the
   same rules and marked `custom`. `scripts/compare-roles.sh` reclassifies with jq and matches
-  on the predefined catalogue (95 roles at high, 117 at medium). **The custom-role path itself
-  is still unproven** — see below.
+  on the predefined catalogue (95 roles at high, 117 at medium) and on a scope holding a real
+  custom role (96 and 118).
 - ☐ **Group expansion** via the Cloud Identity Groups API — written up as a pickup-ready
   item in [`docs/todo/group-expansion-cloud-identity.md`](todo/group-expansion-cloud-identity.md).
   Deliberately left: it needs a new API enabled, `roles/cloudidentity.groups.readonly` (a
@@ -564,27 +564,30 @@ role catalogue, at both risk levels. That also confirms `view=FULL` returns
 The billing path found `roles/billing.admin` held by a user on both accounts, and
 `unclassified_roles` empty — no custom roles are granted on either account.
 
-### Still unproven: custom roles
+### The custom-role path, verified
 
-**`compare-roles.sh --scope` has never run against a scope that actually has a custom role.**
-The estate has none, and no organization to hold org-level ones, so the scope path has only
-been exercised on the empty case. The open question is unchanged:
+The estate has no custom roles of its own, so the scope path was proven with a throwaway role
+created in `gcp-sandbox-2026-18798` and deleted afterwards. It held one high permission
+(`iam.serviceAccounts.actAs`), one medium (`storage.buckets.setIamPolicy`) and one non-risky
+control (`storage.objects.get`).
 
-> Does `iam.googleapis.com/v1/{scope}/roles?view=FULL` return `includedPermissions` for custom
-> roles as it does for predefined ones? If it does not, the classifier sees an empty permission
-> list and reports a custom role as **safe** — a silent under-report, and the worst failure
-> mode this tool has.
+| Check | Result |
+|:---|:---|
+| `--risk high --scope projects/…` | MATCH, 96 roles (95 + the custom one) |
+| `--risk medium --scope projects/…` | MATCH, 118 roles (117 + the custom one) |
+| Tool classification at `high` | `risk: high`, `custom: true`, matched `iam.serviceAccounts.actAs` only |
+| Tool classification at `medium` | still `risk: high`, matched both risky permissions |
+| After deletion | back to 95 — a soft-deleted role is excluded from both sides |
 
-It is plausible that it does — the same `view=FULL` parameter on the same endpoint family
-behaves correctly for predefined roles — but plausible is not verified, which is why the box
-above is ◐ and not ☑. Closing it needs one of:
+**The open question is answered: `view=FULL` does return `includedPermissions` for custom
+roles**, confirmed by reading the raw API response. The risk was real rather than theoretical
+— the default `BASIC` view omits the field entirely, so a version of this code that forgot
+`view=FULL` would classify every custom role as safe. It does not.
 
-- a throwaway custom role in a sandbox project (`gcloud iam roles create … --permissions=…`,
-  then `compare-roles.sh --scope projects/…`, then `gcloud iam roles delete`); or
-- the first run against an estate that has custom roles of its own.
-
-Until then, treat `gcpe roles --scope` as unverified. `gcpe grants` is unaffected: it matches
-custom roles through CAI on permissions, and that path **is** verified.
+Three further properties fell out of the same run, none of which the fake-backed unit tests
+can show: the non-risky control permission never produced a match, so the classifier does not
+over-match; a role's risk is the *highest* of its permissions, not the lowest or the last; and
+`fetch_custom_roles` correctly excludes soft-deleted roles by leaving `showDeleted` off.
 
 ### Risk is a property of permissions, not role names
 

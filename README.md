@@ -9,11 +9,11 @@ whole project, folder or organisation, with filters evaluated server-side.
 > noise reduction, server-side filtering and sorting, IAM enrichment, aggregated summaries, and
 > JSON/CSV output, concurrent multi-scope search, streaming, and a container image with CI.
 > Phase 4's tuning is built but its baseline still needs measuring on a real organisation —
-> run `scripts/benchmark.py` there. Phase 8 adds high-risk role and grant review, including
-> billing-account IAM. Custom-role *listing* is built but unproven — no estate with custom
-> roles has run the check yet. Group expansion (Phase 8) and `gcpe docs`, an interactive
-> capability browser (Phase 9), are written up in [`docs/todo/`](docs/todo/) and still to
-> come. See the [delivery plan](docs/DELIVERY_PLAN.md).
+> run `scripts/benchmark.py` there. Phase 8 adds high-risk role and grant review, covering
+> custom roles and billing-account IAM, all verified against a real estate. Group expansion
+> (Phase 8) and `gcpe docs`, an interactive capability browser (Phase 9), are written up in
+> [`docs/todo/`](docs/todo/) and still to come. See the
+> [delivery plan](docs/DELIVERY_PLAN.md).
 
 ## Quickstart
 

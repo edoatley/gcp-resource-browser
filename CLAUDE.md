@@ -148,11 +148,7 @@ Phases 0–3, 5, 6 and most of 8 are built. Still open: Phase 4's baseline measu
 organisation, effective (inherited) IAM, Phase 8's group expansion, and the deliberately
 conditional Phase 7, and Phase 9 (`gcpe docs`). Deferred items that are not whole phases live
 in `docs/todo/`, one self-contained handoff each — check there before designing something that
-may already be specified. **`gcpe roles --scope` (custom-role listing) is built but unproven**: the
-dev estate has no custom roles and no organization, so `scripts/compare-roles.sh --scope` has
-only ever run on the empty case. If `view=FULL` does not return `includedPermissions` for
-custom roles, the classifier would report one as safe — don't tick that box without a run
-against a scope that actually has one. **Check
+may already be specified. **Check
 `docs/DELIVERY_PLAN.md` before assuming a missing feature is out of scope** — it phases this work and records the sequencing rationale. Keep its checkboxes
 current as phases land, and keep the status note near the top of `README.md` in step.
 
@@ -202,6 +198,12 @@ takes no scope, because billing accounts are not under an organization in the IA
 giving it one would imply a bound that does not exist. That API returns role names with no
 `matched_permissions`, so risk is resolved against the catalogue locally and a role missing
 from it goes into `unclassified_roles` rather than being dropped.
+
+**The role catalogue must be fetched with `view=FULL`.** The IAM API's default `BASIC` view
+omits `includedPermissions` entirely — verified live — so dropping that parameter would make
+every role classify as safe, silently. It is the single most dangerous one-character change in
+this codebase. `scripts/compare-roles.sh` reclassifies from the raw API response precisely so
+that a regression here shows up as a diff.
 
 **Custom roles exist only on organizations and projects, never on folders.** `list_risky_roles`
 rejects a folder scope instead of answering with predefined roles alone, which would read as

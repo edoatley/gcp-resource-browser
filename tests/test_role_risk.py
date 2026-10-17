@@ -489,6 +489,26 @@ def custom(*roles: tuple[str, list[str]], url: str = CUSTOM_ROLES_URL) -> dict:
     }
 
 
+def test_both_role_listings_ask_for_the_full_view() -> None:
+    """Verified live: the default BASIC view omits `includedPermissions` entirely.
+
+    Dropping `view=FULL` would therefore make every role classify as safe --
+    silently, with no error and a plausible-looking empty result. It is the
+    most dangerous one-character change in this codebase, so it is pinned.
+    """
+    session = catalogue(
+        ("roles/owner", OWNER_PERMS),
+        ("roles/viewer", []),
+        **custom(("projects/p/roles/deployer", ["iam.serviceAccounts.actAs"])),
+    )
+
+    core.list_risky_roles("high", scope="projects/p", session=session)
+
+    assert session.calls, "no request was made"
+    for url, params in session.calls:
+        assert params.get("view") == "FULL", f"{url} was not asked for the FULL view"
+
+
 def test_custom_roles_are_classified_by_the_same_rules() -> None:
     session = catalogue(
         ("roles/owner", OWNER_PERMS),

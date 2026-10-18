@@ -256,14 +256,20 @@ uv run gcpe docs                 # opens http://127.0.0.1:8000/docs
 uv run gcpe docs --no-browser --port 8080
 ```
 
-A page per capability. Each one has:
+A page per capability. Each one leads with **Build a call**:
 
-- a purpose line, and the parameters with their CLI flag and API name side by side;
-- examples written for **your** scope, each as a `gcpe` command, an API URL and the `gcloud`
-  equivalent, with a copy button;
-- a **Call API** button that runs the example against the API, whichever tab is showing, and
-  shows the result inline. Its caveats (truncation, hidden rows, coverage) appear verbatim, and
-  the response itself is under **Raw JSON**, with Copy and "Open in new tab".
+- **Examples** are presets: click one to fill the form, then change anything.
+- **The form** has one field per parameter. Each field shows its API name, its CLI flag and the
+  same help text as `--help`, and suggests known values (type names, sort fields, member
+  types). Repeatable parameters take one value per box, with a new empty box appearing as you
+  type.
+- **The same call, three ways** is docked at the bottom of the screen. It shows the `gcpe`
+  command, the API URL and the `gcloud` equivalent, each with a copy button, and they update
+  as you type. Problems (an unknown type, a malformed label, a bad sort field) are listed
+  there using the tool's own error messages.
+- **Call API** runs the API form, whichever tab is showing, and shows the result below. Its
+  caveats (truncation, hidden rows, coverage) appear verbatim, and the response itself is under
+  **Raw JSON**, with Copy and "Open in new tab". An empty result offers next steps.
 
 The header shows who you are signed in as and the project calls bill to. The scope starts as
 your ADC default project. The picker lists every project you can see (one Resource Manager
@@ -274,8 +280,10 @@ Call API makes **real, read-only** calls as you. That is why the browser is loca
 `127.0.0.1` by default, warns if you bind anything else, and `gcpe serve` does not include it.
 The page loads nothing from the internet; the doc links open GitHub.
 
-The examples come from `app/capabilities.py`, and the tests check that every one runs and
-that its gcloud form matches `--show-gcloud`, so the page cannot drift from the tool.
+The commands are rendered by the server (`/docs/_/render`), never assembled in the page,
+using the same code as the catalogue in `app/capabilities.py`. The tests check that every
+example runs, that its gcloud form matches `--show-gcloud`, and that each preset renders
+through the form exactly as the catalogue renders it. So the page cannot drift from the tool.
 
 ## Exit codes
 

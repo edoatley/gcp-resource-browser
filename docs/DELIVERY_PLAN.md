@@ -670,9 +670,12 @@ that its own author lost track of the surface area. That is the trigger for this
     search returned the same 2 rows as the CLI.
 - ☑ `gcpe docs [--host] [--port] [--no-browser]`, local only. It warns when bound off
   loopback.
-- ☐ A parameter builder. Each page leads with an editable form, examples fill it as presets,
-  and the forms re-render live through a server-side render endpoint. Handoff:
-  [`docs/todo/docs-parameter-builder.md`](todo/docs-parameter-builder.md).
+- ☑ A parameter builder. Each page leads with an editable form, and examples fill it as
+  presets. The CLI / API / gcloud forms are docked at the bottom of the screen and re-render
+  live through `/docs/_/render` (server-side, using the core's validators, never executing).
+  A test renders every preset through the form and compares it with the catalogue. Verified
+  live on 2026-10-18: a custom `--type serviceaccount` search from the form returned the same
+  5 rows as the CLI.
 - ☐ A click-through of the page in a browser. The server side above is verified; the
   rendering, copy buttons and NDJSON streaming in the page are not covered by tests.
 

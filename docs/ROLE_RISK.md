@@ -9,12 +9,18 @@ The rules live in [`app/role_risk_rules.json`](../app/role_risk_rules.json). Tes
 - every rule cites a source;
 - every source has a URL and a quote, and is cited by a rule or linked from this page;
 - this page lists every rule;
-- every rule's permission exists in Google's catalogue. A rule matches an exact permission
-  string, so a typo or a retired permission would otherwise match nothing, silently. This check
-  runs against a committed snapshot (`tests/fixtures/iam_permissions.txt.gz`), and
-  `scripts/check-rule-permissions.sh` runs it against the live catalogue. It caught one dead
-  rule when it was introduced: `serviceusage.apiKeys.create`, renamed by Google to
-  `apikeys.keys.create`.
+- every rule's permission is granted by at least one predefined role. A rule matches an exact
+  permission string, so a typo or a retired permission would otherwise match nothing,
+  silently. This check runs against a committed snapshot
+  (`tests/fixtures/iam_permissions.txt.gz`). `scripts/check-rule-permissions.sh` runs it live,
+  and also asks IAM which permissions exist at all (`queryTestablePermissions`, the API behind
+  `gcloud iam list-testable-permissions`). That separates a typo (`UNKNOWN`) from a real
+  permission no standard role grants (`NO-ROLE`), and flags `DEPRECATED` ones.
+
+  When it was introduced, it caught `serviceusage.apiKeys.create` as `NO-ROLE`. The permission
+  still exists (BETA), but no predefined role grants it, and the API Keys API checks
+  `apikeys.keys.create` for key creation ([gcp-api-keys-iam](#gcp-api-keys-iam)). The rule now
+  names that permission.
 
 ## How risk is decided
 

@@ -716,10 +716,15 @@ Written up as a pickup-ready item in
 - ☑ Every rule permission must exist in the IAM catalogue. A unit test checks
   `tests/fixtures/iam_permissions.txt.gz` (14,063 permissions, refreshed by
   `scripts._snapshot_permissions`), and `scripts/check-rule-permissions.sh` checks the live
-  catalogue. **On its first run it found a dead rule:** `serviceusage.apiKeys.create` is in no
-  predefined role (contrary to the review's "all 22 are valid"). Google renamed it
-  `apikeys.keys.create`. The rule now uses that name, with two quoted Google sources checked
-  against the live pages. Live on 2026-10-18:
+  catalogue. It also asks which permissions exist at all (`queryTestablePermissions`, the API
+  behind `gcloud iam list-testable-permissions`), so it can tell a typo (`UNKNOWN`) from a real
+  permission that no predefined role grants (`NO-ROLE`). It also flags `DEPRECATED`.
+  **On its first run it found a dead rule:** `serviceusage.apiKeys.create` still exists (BETA)
+  but no predefined role grants it, and the API Keys API checks `apikeys.keys.create`
+  (contrary to the review's "all 22 are valid"). The rule now uses `apikeys.keys.create`, with
+  two quoted Google sources checked against the live pages. Live on 2026-10-18:
+  - a deliberate typo came back `UNKNOWN` and the old name `NO-ROLE`;
+  - all 22 rules passed, in about 20 seconds;
   - `compare-roles.sh` matched at high (95) and medium (118, up from 117, because
     `roles/serviceusage.apiKeysAdmin` is newly classified);
   - `compare-grants.sh` matched on two projects.

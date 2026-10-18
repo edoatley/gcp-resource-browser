@@ -89,7 +89,7 @@
     {"permission": "orgpolicy.policy.set", "risk": "high", "reason": "Can disable organization policy guardrails", "sources": ["rhino-part2"]},
     {"permission": "deploymentmanager.deployments.create", "risk": "high", "reason": "Deploys as the Google APIs service account, which has Editor by default", "sources": ["rhino-part1"]},
     {"permission": "storage.hmacKeys.create", "risk": "medium", "reason": "Can mint Cloud Storage HMAC keys for a service account", "sources": ["rhino-part2"]},
-    {"permission": "apikeys.keys.create", "risk": "medium", "reason": "Can create API keys, which are unrestricted by default (formerly serviceusage.apiKeys.create, the name Rhino uses)", "sources": ["gcp-api-keys-iam", "gcp-api-keys", "rhino-part2"]},
+    {"permission": "apikeys.keys.create", "risk": "medium", "reason": "Can create API keys, which are unrestricted by default. The API Keys API checks this permission; the older serviceusage.apiKeys.create that Rhino names still exists but no predefined role grants it", "sources": ["gcp-api-keys-iam", "gcp-api-keys", "rhino-part2"]},
     {"permission": "storage.buckets.setIamPolicy", "risk": "medium", "reason": "Can grant access to a bucket, including publicly", "sources": ["rhino-part2"]},
     {"permission": "secretmanager.secrets.setIamPolicy", "risk": "medium", "reason": "Can grant access to a secret", "sources": ["rhino-part2"]},
     {"permission": "cloudfunctions.functions.setIamPolicy", "risk": "medium", "reason": "Can grant invoke access to a function, including publicly", "sources": ["rhino-part2"]},

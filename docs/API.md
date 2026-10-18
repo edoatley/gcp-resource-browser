@@ -273,7 +273,9 @@ curl -s 'http://127.0.0.1:8000/v1/grants?scope=organizations/123&role_risk=high&
 | `matched_permissions` | The risky permissions in this role that CAI matched: *why* the grant is listed |
 | `condition` | The IAM condition expression, when the binding is conditional |
 | `suppressed` | Grants to Google service agents that were hidden |
-| `coverage_note` | What the search cannot see. **Read it before treating the list as complete.** |
+| `member_count` | With `expand_members`: how many principals this grant's member stands for. Absent when not requested or not readable. |
+| `expansions` | With `expand_members`: each member that stands for others, mapped to `{kind, members, count, note, error}`. `members: []` means read and empty; `error` names what could not be read. Absent when not requested. |
+| `coverage_note` | What the search cannot see. **Read it before treating the list as complete.** It names any site downgrade of the risk rules. |
 
 ### `GET /v1/billing-grants`
 
@@ -327,7 +329,8 @@ curl -s 'http://127.0.0.1:8000/v1/billing-grants?role_risk=high' | jq '.grants'
 |:---|:---|
 | `accounts` | The billing accounts read — one `getIamPolicy` each. An empty list means none were **visible**, which is not the same as none existing. |
 | `unclassified_roles` | Roles granted on an account whose permissions are not in the predefined catalogue, usually custom roles. The Cloud Billing API returns role names only, so these cannot be classified here. **They are listed, not dropped** — review them by hand. |
-| `coverage_note` | What the search cannot see. **Read it before treating the list as complete.** |
+| `member_count`, `expansions` | With `expand_members`, as for `/v1/grants`. |
+| `coverage_note` | What the search cannot see. **Read it before treating the list as complete.** It names any site downgrade of the risk rules. |
 
 ## Errors
 

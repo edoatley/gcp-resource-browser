@@ -108,6 +108,8 @@ the user runs `gcloud auth application-default login` first. This is a deliberat
   routes its pages first and mounts the API app beneath, so "Call API" is a plain GET of a `/v1`
   URL; never add an endpoint that executes something. Local only: `serve` must not mount it.
 - `app/fanout.py` — bounded concurrent search across several scopes.
+- `app/expansion.py` — `--expand-members`: who is behind `group:` / `projectOwner:`-style
+  members. Opt-in, one level, attached-only, bounded at 8; never changes rows.
 - `app/cache.py` — opt-in TTL cache, inert unless a caller sets a TTL.
 - `app/params.py` — `SearchFilters` (what a search takes) and `Help` (how each filter is
   described). Both surfaces read from here.
@@ -247,7 +249,8 @@ dropped.
 states that inherited grants are excluded; presenting attached bindings as effective access is
 wrong in the unsafe direction. `iam_bindings is None` means not requested, `[]` means requested
 and none attached — do not collapse them. Effective IAM (`batch_get_effective_iam_policies`,
-20 names per call) is deferred until after bounded fan-out exists.
+20 names per call) is not built. Its stated prerequisite, bounded fan-out, now exists. The
+design is in `docs/todo/effective-iam.md`.
 
 **`-o json|csv` writes the payload to stdout and every warning to stderr.** Keep it that way,
 or piped output stops being parseable.

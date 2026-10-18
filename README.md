@@ -201,6 +201,7 @@ uv run gcpe grants $SCOPE                                  # every high-risk gra
 uv run gcpe grants $SCOPE --by member                      # rolled up: what each principal holds
 uv run gcpe grants $SCOPE --member-type user --member-type group --role-risk medium
 uv run gcpe billing-grants --by member                     # who can administer a billing account
+uv run gcpe grants $SCOPE --expand-members                 # + who is behind groups and project roles
 ```
 
 Google's own service agents are hidden and counted (`--show-all` includes them). Each result
@@ -210,6 +211,9 @@ its folders and organisation, so search the organisation to cover every level.
 Billing accounts need their own command: Cloud Asset Inventory does not index them, so no
 `grants` scope reaches them however wide. `billing-grants` reads the Cloud Billing API instead
 and covers every account your credentials can see.
+
+`--expand-members` shows who stands behind a `group:` or `projectOwner:`-style member. It is
+off by default because it lists named people; tables show a count, and `-o json` the names.
 
 **10. Use the HTTP API.** Searches, summaries, type listings, risky roles and grants are also
 available over HTTP (multi-scope search is CLI-only):
@@ -229,6 +233,14 @@ Open <http://127.0.0.1:8000/api/docs> to explore and call every endpoint in Swag
 `uv run gcpe docs` for a guided page per capability with the CLI and gcloud forms alongside. The
 same spec is [published online](https://edoatley.github.io/gcp-resource-browser/) as a
 read-only reference.
+
+**11. Browse everything.** `gcpe docs` opens a local page per capability. Pick an example,
+edit any parameter, and see the same call as a `gcpe` command, an API URL and `gcloud`, then
+run it:
+
+```bash
+uv run gcpe docs
+```
 
 Next: [CLI guide](docs/CLI.md) for every option, [Concepts](docs/CONCEPTS.md) for how filters
 and noise reduction behave, and [Deployment](docs/DEPLOYMENT.md) to run it as a service.

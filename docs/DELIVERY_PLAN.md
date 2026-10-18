@@ -390,6 +390,11 @@ omitting data would misrepresent the resource.
   inheritance properly but needs chunked, concurrency-bounded batching — which belongs after
   Phase 4's bounded fan-out, not before it. The attached/effective distinction is already
   surfaced in `iam_note`, so adding the mode later is additive rather than a correction.
+  *Update, 2026-10:* bounded fan-out now exists, so the prerequisite is met. A review of the
+  risk feature found this to be its largest remaining gap: a project-scoped `grants` search
+  cannot see folder or organization grants. Written up in
+  [`docs/todo/effective-iam.md`](todo/effective-iam.md). Only partly verifiable on this
+  estate, which has no organization.
 - **Non-CAI enrichment** stays gated, per the rule below.
 
 ---

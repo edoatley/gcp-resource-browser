@@ -149,6 +149,17 @@ This attaches the bindings **attached directly** to each resource. Inherited gra
 included. See [Concepts → IAM](CONCEPTS.md#iam-enrichment) before using it to answer "who has
 access".
 
+```bash
+gcpe search projects/my-project --type bucket --include-iam --effective -o json
+```
+
+`--effective` adds the bindings each resource inherits, up to and including the scope. Each one
+carries `inherited_from`. A project scope stops at the project, so folder and organization grants
+need a wider scope. `--effective` without `--include-iam` is rejected (exit 2). Exit 7 means some
+resources' inherited bindings could not be read. Each is named on stderr and in `iam_errors`. The
+table shows no IAM, so use `-o json`. See
+[Concepts → Inherited bindings](CONCEPTS.md#inherited-bindings-effective).
+
 ## Summaries
 
 ```bash

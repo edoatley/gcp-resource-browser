@@ -52,6 +52,7 @@ def search_command(
     suppressed: int = 0,
     include_iam: bool = False,
     billing_project: str | None = None,
+    effective_iam: bool = False,
 ) -> str:
     """The gcloud command(s) equivalent to one scope's search, with caveats.
 
@@ -91,6 +92,18 @@ def search_command(
         lines.append("")
         lines.append("# Attached IAM bindings, joined on the resource name:")
         lines.append(_command("search-all-iam-policies", iam_flags))
+
+    if include_iam and effective_iam:
+        lines.append("")
+        lines.append(
+            "# --effective: inherited bindings, for the names above, at most 20 per command."
+        )
+        lines.append(
+            _command(
+                "get-effective-iam-policy",
+                [f"--scope={shlex.quote(scope)}", "--names=NAME[,NAME...]", *billing],
+            )
+        )
 
     return "\n".join(lines)
 

@@ -145,6 +145,9 @@ class SearchResult:
     suppressed: int = 0
     suppressed_summary: str = ""
     iam_note: str | None = None
+    # None unless effective IAM was requested; then resource -> why its
+    # inherited bindings could not be read ({} when all were).
+    iam_errors: dict[str, str] | None = None
 
 
 @lru_cache(maxsize=1)
@@ -315,6 +318,7 @@ def _cache_key(filters: SearchFilters) -> str:
             filters.show_all,
             tuple(filters.sort),
             filters.include_iam,
+            filters.effective_iam,
         )
     )
 
@@ -537,6 +541,10 @@ class _Prepared:
 def _prepare(filters: SearchFilters, client: asset_v1.AssetServiceClient | None) -> _Prepared:
     """Validate, resolve and compile everything before the first API call."""
     validate_scope(filters.scope)
+    if filters.effective_iam and not filters.include_iam:
+        # Rejected rather than ignored: a caller asking for effective IAM and
+        # getting no IAM at all might read the absence as "nothing granted".
+        raise InvalidFilterError("effective requires include_iam: it extends the IAM attached.")
     asset_types = resolve_asset_types(filters.resource_types)
     client = client or get_client()
 
@@ -609,6 +617,13 @@ def search_resources(
         results = attach_iam(results, bindings)
         iam_note = ATTACHED_IAM_NOTE
 
+    iam_errors = None
+    if filters.effective_iam:
+        from app.effective import attach_inherited  # imported here: it calls back into core
+
+        results, iam_errors = attach_inherited(results, filters.scope, prepared.client)
+        iam_note = effective_iam_note(filters.scope, iam_errors)
+
     result = SearchResult(
         resources=results,
         truncated=prepared.truncated,
@@ -617,10 +632,83 @@ def search_resources(
         suppressed=prepared.noise.suppressed,
         suppressed_summary=prepared.noise.summary(),
         iam_note=iam_note,
+        iam_errors=iam_errors,
     )
     if filters.cache_ttl > 0:
         _RESPONSE_CACHE.put(_cache_key(filters), result)
     return result
+
+
+# --- Effective (inherited) IAM ------------------------------------------------
+#
+# CAI's batchGetEffectiveIamPolicies returns, for each named resource, the
+# policy attached to it and those attached to its ancestors -- but only "up to
+# the scope" (the API's own words). A project scope therefore shows what a
+# resource inherits from its project, never what the project inherits from a
+# folder or organization. That bound is the API's, and every note says so.
+
+# The API's per-call cap on names. Verified live: 21 names is InvalidArgument.
+EFFECTIVE_IAM_BATCH = 20
+
+_EFFECTIVE_REMEDY = (
+    "Reading effective IAM needs cloudasset.assets.analyzeIamPolicy, searchAllResources and "
+    "searchAllIamPolicies on the scope; roles/cloudasset.viewer holds all three."
+)
+
+
+def effective_iam_policies(
+    scope: str, names: Sequence[str], client: asset_v1.AssetServiceClient | None = None
+) -> list[asset_v1.BatchGetEffectiveIamPoliciesResponse.EffectiveIamPolicy]:
+    """Each resource's own policy and its ancestors' policies, up to `scope`.
+
+    One call, at most `EFFECTIVE_IAM_BATCH` names. Every name must be inside
+    the scope and known to CAI's resource search; one that is not fails the
+    whole call with NotFound (verified live), which callers split on.
+    """
+    if len(names) > EFFECTIVE_IAM_BATCH:
+        raise ValueError(f"At most {EFFECTIVE_IAM_BATCH} names per call, got {len(names)}")
+    request = asset_v1.BatchGetEffectiveIamPoliciesRequest(scope=scope, names=list(names))
+    try:
+        response = (client or get_client()).batch_get_effective_iam_policies(request=request)
+    except gcp_exceptions.NotFound as exc:
+        # Not the scope: _translate's "Scope not found" would blame the wrong thing.
+        raise ScopeNotFound(
+            f"Cloud Asset Inventory could not find a resource in {scope}. "
+            f"Upstream said: {exc.message}"
+        ) from exc
+    except gcp_exceptions.PermissionDenied as exc:
+        if (disabled := _service_disabled_error(exc)) is not None:
+            raise disabled from exc
+        raise ScopeAccessDenied(
+            f"Permission denied reading effective IAM in {scope}. {_EFFECTIVE_REMEDY} "
+            f"Upstream said: {exc.message}"
+        ) from exc
+    except gcp_exceptions.GoogleAPICallError as exc:
+        raise _translate(exc, scope) from exc
+    return list(response.policy_results)
+
+
+def effective_iam_note(scope: str, errors: dict[str, str]) -> str:
+    """What `--include-iam --effective` returned. Stated on every such response."""
+    if scope.startswith("organizations/"):
+        reach = f"its ancestors up to and including {scope}, the top of the hierarchy"
+        above = ""
+    else:
+        reach = f"its ancestors up to and including {scope}"
+        above = (
+            f" Grants made above {scope}, on its folders or organization, are NOT included: "
+            "Cloud Asset Inventory stops at the search scope, so search a wider one to see them."
+        )
+    note = (
+        f"Bindings attached to each resource, plus those it inherits from {reach}. Inherited "
+        f"bindings carry `inherited_from`, the resource they are attached to.{above}"
+    )
+    if errors:
+        note += (
+            f" Inherited bindings could not be read for {len(errors)} resource(s), which show "
+            "attached bindings only; they are listed in `iam_errors`."
+        )
+    return note
 
 
 # --- Role risk -------------------------------------------------------------

@@ -98,6 +98,7 @@ def _search_many(
                     query=merged.query,
                     order_by=core.build_order_by(filters.sort),
                     include_iam=filters.include_iam,
+                    effective_iam=filters.effective_iam,
                     billing_project=billing_project,
                 )
                 for scope in scopes
@@ -119,6 +120,7 @@ def _search_many(
         notes.append(f"{merged.suppressed} hidden. Use --show-all to include them.")
     if merged.iam_note:
         notes.append(merged.iam_note)
+    notes.extend(_iam_error_notes(merged.iam_errors))
 
     if output is not OutputFormat.TABLE:
         _emit(merged.resources, output)
@@ -138,8 +140,20 @@ def _search_many(
     # under-report the estate, which is the failure this tool exists to prevent.
     for failed_scope, reason in sorted(merged.failures.items()):
         err_console.print(f"[red]FAILED[/red] {failed_scope}: {reason}")
-    if merged.failures:
+    if merged.failures or merged.iam_errors:
         raise typer.Exit(code=EXIT_PARTIAL)
+
+
+def _iam_error_notes(iam_errors: dict[str, str] | None) -> list[str]:
+    """Each resource whose inherited bindings could not be read, and why.
+
+    A note per resource rather than a count: the JSON row for it still shows
+    attached bindings, which read as complete unless the gap is named.
+    """
+    return [
+        f"Inherited IAM not read for {name}: {reason}"
+        for name, reason in sorted((iam_errors or {}).items())
+    ]
 
 
 def _print_gcloud(command: str, output: OutputFormat) -> None:
@@ -167,6 +181,8 @@ def _notes_to_stderr(result: core.SearchResult, limit: int) -> None:
         err_console.print(result.suppressed_summary)
     if result.iam_note:
         err_console.print(result.iam_note)
+    for note in _iam_error_notes(result.iam_errors):
+        err_console.print(note)
 
 
 def _report_suppressed(result: core.SearchResult) -> None:
@@ -257,6 +273,9 @@ def search(
     show_all: bool = typer.Option(False, "--show-all", help=Help.SHOW_ALL),
     sort: list[str] = typer.Option([], "--sort", help=Help.SORT),
     include_iam: bool = typer.Option(False, "--include-iam", help=Help.INCLUDE_IAM),
+    effective: bool = typer.Option(
+        False, "--effective", help=f"{Help.EFFECTIVE_IAM} Needs --include-iam."
+    ),
     output: OutputFormat = typer.Option(OutputFormat.TABLE, "--output", "-o", help=Help.OUTPUT),
     also_scope: list[str] = typer.Option(
         [],
@@ -284,6 +303,7 @@ def search(
         show_all=show_all,
         sort=sort,
         include_iam=include_iam,
+        effective_iam=effective,
         cache_ttl=cache_ttl,
     )
 
@@ -313,6 +333,7 @@ def search(
                 truncated=result.truncated,
                 suppressed=result.suppressed,
                 include_iam=include_iam,
+                effective_iam=effective,
                 billing_project=billing_project,
             ),
             output,
@@ -323,13 +344,17 @@ def search(
         # pipeline reading stdout gets valid JSON or CSV and nothing else.
         _emit(result.resources, output)
         _notes_to_stderr(result, limit)
-        return
-
-    _render(result, scope, title=f"GCP resources in {scope}", show_query=show_query)
-    _warn_if_truncated(result, limit)
-    _report_suppressed(result)
-    if result.iam_note:
-        console.print(f"[dim]{result.iam_note}[/dim]")
+    else:
+        _render(result, scope, title=f"GCP resources in {scope}", show_query=show_query)
+        _warn_if_truncated(result, limit)
+        _report_suppressed(result)
+        if result.iam_note:
+            console.print(f"[dim]{result.iam_note}[/dim]")
+        for note in _iam_error_notes(result.iam_errors):
+            err_console.print(note)
+    # Partial, like a failed --also-scope: some rows lack their inherited IAM.
+    if result.iam_errors:
+        raise typer.Exit(code=EXIT_PARTIAL)
 
 
 @cli.command("list-resources")

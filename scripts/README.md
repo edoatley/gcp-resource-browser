@@ -15,6 +15,8 @@ except `setup-gcp.sh`.
 | `gcloud-list-roles.sh` / `_explorer_roles.py` | The two sides of `compare-roles.sh`, as sorted `risk<TAB>role` lines |
 | `compare-billing-grants.sh` | Diff `gcpe billing-grants --show-all` against gcloud's reading of the Cloud Billing API |
 | `gcloud-billing-grants.sh` / `_explorer_billing_grants.py` | The two sides of `compare-billing-grants.sh`, as sorted `resource<TAB>role<TAB>member` lines |
+| `compare-effective-iam.sh` | Diff `--include-iam --effective --show-all`'s inherited bindings against gcloud. The gcloud side reads one name per call, independent of the tool's batching and its retry-on-404 split. |
+| `gcloud-effective-iam.sh` / `_explorer_effective_iam.py` | The two sides of `compare-effective-iam.sh`, as sorted `resource<TAB>inherited_from<TAB>role<TAB>member` lines, plus `resource<TAB>UNREADABLE` for each resource neither could read |
 | `compare-projects.sh` | Diff the `gcpe docs` scope picker (Resource Manager v3 search) against `gcloud projects list` (v1) |
 | `gcloud-list-projects.sh` / `_explorer_projects.py` | The two sides of `compare-projects.sh`, as sorted `project_id<TAB>number` lines |
 | `compare-member-expansion.sh` | Diff `--expand-members` against gcloud: project roles via Resource Manager `getIamPolicy` (the tool uses CAI), groups via `gcloud identity` |

@@ -161,7 +161,7 @@ adding a resource type is a one-line change that lights up both surfaces.
 ## Not yet built
 
 Phases 0–3, 5, 6, most of 8 and most of 9 are built. Still open: Phase 4's baseline measured on a real
-organisation, effective (inherited) IAM, live verification of Phase 8's `group:` expansion, and the deliberately
+organisation, grants made above the search scope (`docs/todo/grants-above-scope.md`), live verification of Phase 8's `group:` expansion, and the deliberately
 conditional Phase 7, and a manual click-through of Phase 9's browser. Deferred items that are not whole phases live
 in `docs/todo/`, one self-contained handoff each — check there before designing something that
 may already be specified.
@@ -248,12 +248,20 @@ its siblings come from the project's attached policy through CAI; `group:` comes
 Identity. An unreadable member gets an `error` and is named in the coverage note, never
 dropped.
 
-**IAM is attached-only, and must keep saying so.** `iam_note` on every IAM-bearing response
-states that inherited grants are excluded; presenting attached bindings as effective access is
-wrong in the unsafe direction. `iam_bindings is None` means not requested, `[]` means requested
-and none attached — do not collapse them. Effective IAM (`batch_get_effective_iam_policies`,
-20 names per call) is not built. Its stated prerequisite, bounded fan-out, now exists. The
-design is in `docs/todo/effective-iam.md`.
+**IAM is attached-only unless `effective` is asked for, and must always say which.** `iam_note`
+on every IAM-bearing response states what was included; presenting attached bindings as
+effective access is wrong in the unsafe direction. `iam_bindings is None` means not requested,
+`[]` means requested and none attached — do not collapse them.
+
+**Effective IAM stops at the search scope** (`app/effective.py`, `--include-iam --effective`).
+`batchGetEffectiveIamPolicies` returns ancestors only "up to the scope" — the API's words — so a
+project scope never shows folder or organization grants. Do not build a project-scoped
+"inherited grants" feature on it: on this estate it would report none and look verified, and
+under a real org it would still report none. `docs/todo/grants-above-scope.md` has the options.
+Live facts: 20 names per call (21 is InvalidArgument); one unknown name 404s the whole batch,
+which is why a 404'd batch is retried one name per call; workload identity pools always 404.
+Inherited bindings carry `inherited_from`; new fields use `exclude_if` so default output is
+byte-identical.
 
 **`-o json|csv` writes the payload to stdout and every warning to stderr.** Keep it that way,
 or piped output stops being parseable.

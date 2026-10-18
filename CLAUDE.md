@@ -154,7 +154,7 @@ adding a resource type is a one-line change that lights up both surfaces.
 
 Phases 0–3, 5, 6, most of 8 and most of 9 are built. Still open: Phase 4's baseline measured on a real
 organisation, effective (inherited) IAM, Phase 8's group expansion, and the deliberately
-conditional Phase 7, and live verification of Phase 9's scope picker. Deferred items that are not whole phases live
+conditional Phase 7, and Phase 9's parameter builder. Deferred items that are not whole phases live
 in `docs/todo/`, one self-contained handoff each — check there before designing something that
 may already be specified.
 

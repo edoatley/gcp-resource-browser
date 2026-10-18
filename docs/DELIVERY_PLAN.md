@@ -660,11 +660,14 @@ that its own author lost track of the surface area. That is the trigger for this
 - ☑ Session context in place of placeholders: principal, ADC quota project and default project.
   Verified live with a user credential: the principal came from tokeninfo, and the default
   scope was the ADC project.
-- ◐ The scope picker: one Resource Manager `projects.search` call, with
-  `scripts/compare-projects.sh` against `gcloud projects list`. It is unit-tested, and the
-  `SERVICE_DISABLED` path was verified live: it names `gcp-resource-browser-eo`. The list
-  itself is unverified until `cloudresourcemanager.googleapis.com` is enabled there. Re-run
-  `scripts/setup-gcp.sh`, which now enables it, then `scripts/compare-projects.sh`.
+- ☑ The scope picker: one Resource Manager `projects.search` call. Verified live on
+  2026-10-18:
+  - the `SERVICE_DISABLED` path names `gcp-resource-browser-eo` and the fix;
+  - after `scripts/setup-gcp.sh` enabled the API, `scripts/compare-projects.sh` matched
+    `gcloud projects list` on all 7 projects;
+  - the page's picker listed the same 7;
+  - choosing `projects/idp-prototype-edo` in the page rewrote every example, and its bucket
+    search returned the same 2 rows as the CLI.
 - ☑ `gcpe docs [--host] [--port] [--no-browser]`, local only. It warns when bound off
   loopback.
 - ☐ A parameter builder. Each page leads with an editable form, examples fill it as presets,

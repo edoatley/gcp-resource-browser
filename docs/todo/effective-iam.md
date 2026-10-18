@@ -4,7 +4,7 @@
 organization, not only grants attached within it. Today a project-scoped `gcpe grants` cannot
 see Owner granted on the folder above, and its coverage note has to say so.
 
-**Branch context:** `main` after Phase 10 (#12). This was found in a review of the risk/role
+**Branch context:** `main` after #14 (all earlier PRs merged; working tree clean). This was found in a review of the risk/role
 feature. The deferral reason in `docs/DELIVERY_PLAN.md` ("belongs after Phase 4's bounded
 fan-out") no longer applies: bounded fan-out exists (`app/fanout.py`, `app/expansion.py`).
 Branch fresh from `main`.
@@ -34,6 +34,15 @@ carries a coverage note admitting it.
 for grants, but needs org-level Cloud Asset Viewer, which many callers lack. That is why
 fan-out exists.
 
+**The API, confirmed against the installed client and one live call:**
+`core.get_client().batch_get_effective_iam_policies(request=asset_v1.BatchGetEffectiveIamPoliciesRequest(scope=…, names=[…]))`.
+The response is `policy_results[]`, each with:
+- `full_resource_name`;
+- `policies[]`, ordered from the resource itself up through its ancestors. Each entry has an
+  `attached_resource` and a `policy`, which has `bindings[]`.
+
+The tests' `FakeAssetClient` (`tests/conftest.py`) needs a matching method.
+
 **Key constraints:**
 - CAI `batchGetEffectiveIamPolicies` takes **at most 20 resource names per call**, and the
   scope must contain them. Batch the names and bound concurrency at 8, like fan-out. Fail
@@ -44,10 +53,16 @@ fan-out exists.
 - Keep attached and inherited distinguishable in every output. Presenting inherited as
   attached, or the reverse, misleads in one direction or the other.
 - Opt-in (`--effective` / `?effective=true`). The default answer must stay byte-identical.
-- **Verification is limited here.** The dev estate has no organization or folders, so nothing
-  is inherited. Verify that the call works, that it returns no ancestors for these projects,
-  and that the output is unchanged. Full verification needs an organization with a folder
-  grant (see `CLAUDE.md`, "The dev estate has no organization").
+- **Verification is half-possible here.** The dev estate has no organization or folders, so
+  *project-level* answers have no ancestors to find. But **resources do inherit from their
+  project**, and that is verifiable now. A live probe on 2026-10-18, against bucket
+  `edo-dev-platform-refactor-check` in `idp-prototype-edo`, returned two policies:
+  1. the bucket's own (legacy bucket roles);
+  2. the project's (`roles/owner`, `roles/storage.admin`, …).
+
+  So `--include-iam effective` can be verified end to end on this estate. Grants inherited
+  from folders or an organization cannot (see `CLAUDE.md`, "The dev estate has no
+  organization").
 
 ## What to do
 
@@ -69,11 +84,13 @@ fan-out exists.
 ## Acceptance criteria
 
 - [ ] With the flag off, every IAM-bearing response is byte-identical to today
+- [ ] On the dev estate, a bucket's effective IAM shows its project's bindings marked
+      `inherited_from` the project, and agrees with `gcloud asset get-effective-iam-policy`
 - [ ] With it on, inherited grants are marked `inherited_from`, are classified via the
       catalogue, and an unclassifiable inherited role is listed rather than dropped
 - [ ] Calls are batched by 20 names, with concurrency at most 8, and a failed batch is named
-- [ ] On the dev estate: the call succeeds, no ancestors are reported, and the output is
-      unchanged
+- [ ] On the dev estate, project-scoped `grants --effective` reports no inherited grants,
+      because there is no organization or folder, and says so in the coverage note
 - [ ] On an estate with a folder or org grant: `compare-effective-iam.sh` reports MATCH
 
 ## Related specs / docs

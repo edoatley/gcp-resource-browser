@@ -754,6 +754,12 @@ def fetch_custom_roles(scope: str, session=None) -> list[dict]:
     )
 
 
+def _with_downgrades(note: str) -> str:
+    """A coverage note, plus any site downgrade of the risk rules."""
+    downgrades = role_risk.downgrade_note()
+    return f"{note} {downgrades}" if downgrades else note
+
+
 def _roles_coverage_note(scope: str | None) -> str:
     """Which roles the listing could see. Stated on every response."""
     if scope is None:
@@ -845,7 +851,7 @@ def list_risky_roles(
     return RoleList(
         min_risk=minimum.value,
         scope=scope,
-        coverage_note=_roles_coverage_note(scope),
+        coverage_note=_with_downgrades(_roles_coverage_note(scope)),
         count=len(roles),
         suppressed=hidden,
         suppressed_summary=(
@@ -1003,7 +1009,7 @@ def search_grants(
             if hidden
             else ""
         ),
-        coverage_note=_expansion_note(_coverage_note(filters.scope), expansions),
+        coverage_note=_with_downgrades(_expansion_note(_coverage_note(filters.scope), expansions)),
         grants=grants,
         groups=group_grants(grants, filters.group_by) if filters.group_by else None,
         expansions=expansions,
@@ -1156,7 +1162,7 @@ def search_billing_grants(filters: BillingGrantFilters, session=None) -> Billing
             else ""
         ),
         unclassified_roles=sorted(unclassified),
-        coverage_note=_expansion_note(BILLING_COVERAGE_NOTE, expansions),
+        coverage_note=_with_downgrades(_expansion_note(BILLING_COVERAGE_NOTE, expansions)),
         grants=grants,
         groups=group_grants(grants, filters.group_by) if filters.group_by else None,
         expansions=expansions,

@@ -91,15 +91,7 @@ def _validate(raw: dict, source: Path) -> Config:
     if not isinstance(role_risk_rules, list):
         raise ConfigError(f"{source}: 'role_risk_rules' must be a list.")
     for rule in role_risk_rules:
-        if (
-            not isinstance(rule, dict)
-            or not {"permission", "risk", "reason"} <= set(rule)
-            or rule["risk"] not in ("high", "medium")
-        ):
-            raise ConfigError(
-                f"{source}: each role risk rule needs 'permission', 'reason' and a 'risk' of "
-                "'high' or 'medium' (and may add 'sources')."
-            )
+        _validate_risk_rule(rule, source)
 
     return Config(
         source=source,
@@ -108,6 +100,68 @@ def _validate(raw: dict, source: Path) -> Config:
         unsuppressed_types=frozenset(unsuppress),
         extra_role_risk_rules=list(role_risk_rules),
     )
+
+
+_RISK_RULE_KEYS = {"permission", "risk", "reason", "sources", "downgrade"}
+_RANK = {"medium": 1, "high": 2}
+
+
+def _builtin_risk_rules() -> dict:
+    # Read directly rather than through role_risk, which merges this config in.
+    from app.role_risk import RULES_FILE
+
+    return json.loads(RULES_FILE.read_text())
+
+
+def _validate_risk_rule(rule, source: Path) -> None:
+    """A site rule must be well-formed, cite real sources, and lower nothing by accident.
+
+    Weakening the audit is the one change here that cannot announce itself:
+    a lowered rule just stops reporting grants. So a downgrade must be
+    confirmed with `"downgrade": true`, and is then named in every coverage
+    note (`role_risk.downgrade_note`).
+    """
+    if (
+        not isinstance(rule, dict)
+        or not {"permission", "risk", "reason"} <= set(rule)
+        or rule["risk"] not in _RANK
+    ):
+        raise ConfigError(
+            f"{source}: each role risk rule needs 'permission', 'reason' and a 'risk' of "
+            "'high' or 'medium' (and may add 'sources' and 'downgrade')."
+        )
+    permission = rule["permission"]
+    if unknown := set(rule) - _RISK_RULE_KEYS:
+        raise ConfigError(
+            f"{source}: role risk rule for {permission} has unknown key(s) "
+            f"{', '.join(sorted(unknown))}. Expected: {', '.join(sorted(_RISK_RULE_KEYS))}."
+        )
+
+    builtin = _builtin_risk_rules()
+    cited = rule.get("sources", [])
+    if not isinstance(cited, list) or (missing := sorted(set(cited) - set(builtin["sources"]))):
+        raise ConfigError(
+            f"{source}: role risk rule for {permission} cites unknown source(s) "
+            f"{', '.join(missing) if isinstance(cited, list) else repr(cited)}. "
+            f"Known: {', '.join(sorted(builtin['sources']))}."
+        )
+
+    was = {r["permission"]: r["risk"] for r in builtin["rules"]}.get(permission)
+    lowers = was is not None and _RANK[rule["risk"]] < _RANK[was]
+    confirmed = rule.get("downgrade", False)
+    if not isinstance(confirmed, bool):
+        raise ConfigError(f"{source}: 'downgrade' on {permission} must be true or false.")
+    if lowers and not confirmed:
+        raise ConfigError(
+            f"{source}: the rule for {permission} lowers it from {was} to {rule['risk']}, which "
+            'stops some grants being reported. If that is intended, add "downgrade": true; '
+            "it will then be named in every coverage note."
+        )
+    if confirmed and not lowers:
+        raise ConfigError(
+            f'{source}: the rule for {permission} sets "downgrade": true but does not lower '
+            "a built-in rule. Remove it, so it cannot hide a real downgrade later."
+        )
 
 
 @lru_cache(maxsize=1)

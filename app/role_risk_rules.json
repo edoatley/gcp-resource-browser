@@ -52,6 +52,16 @@
       "url": "https://www.cisecurity.org/benchmark/google_cloud_computing_platform",
       "quote": "Assign the Service Account User (iam.serviceAccountUser) and Service Account Token Creator (iam.serviceAccountTokenCreator) roles to a user for a specific service account rather than assigning the role to a user at project level."
     },
+    "gcp-api-keys-iam": {
+      "title": "Google Cloud API Keys: Access control with IAM",
+      "url": "https://docs.cloud.google.com/api-keys/docs/access-control",
+      "quote": "API Keys uses Identity and Access Management to manage access to the keys. ... Method Required Permission(s) projects.locations.keys.create apikeys.keys.create"
+    },
+    "gcp-api-keys": {
+      "title": "Google Cloud authentication: Manage API keys",
+      "url": "https://docs.cloud.google.com/docs/authentication/api-keys",
+      "quote": "Unrestricted API keys are insecure. To reduce security risks, you can restrict API keys"
+    },
     "rhino-part1": {
       "title": "Rhino Security Labs (Spencer Gietzen): Privilege Escalation in Google Cloud Platform -- Part 1 (IAM)",
       "url": "https://rhinosecuritylabs.com/gcp/privilege-escalation-google-cloud-platform-part-1/",
@@ -79,7 +89,7 @@
     {"permission": "orgpolicy.policy.set", "risk": "high", "reason": "Can disable organization policy guardrails", "sources": ["rhino-part2"]},
     {"permission": "deploymentmanager.deployments.create", "risk": "high", "reason": "Deploys as the Google APIs service account, which has Editor by default", "sources": ["rhino-part1"]},
     {"permission": "storage.hmacKeys.create", "risk": "medium", "reason": "Can mint Cloud Storage HMAC keys for a service account", "sources": ["rhino-part2"]},
-    {"permission": "serviceusage.apiKeys.create", "risk": "medium", "reason": "Can create unrestricted API keys", "sources": ["rhino-part2"]},
+    {"permission": "apikeys.keys.create", "risk": "medium", "reason": "Can create API keys, which are unrestricted by default (formerly serviceusage.apiKeys.create, the name Rhino uses)", "sources": ["gcp-api-keys-iam", "gcp-api-keys", "rhino-part2"]},
     {"permission": "storage.buckets.setIamPolicy", "risk": "medium", "reason": "Can grant access to a bucket, including publicly", "sources": ["rhino-part2"]},
     {"permission": "secretmanager.secrets.setIamPolicy", "risk": "medium", "reason": "Can grant access to a secret", "sources": ["rhino-part2"]},
     {"permission": "cloudfunctions.functions.setIamPolicy", "risk": "medium", "reason": "Can grant invoke access to a function, including publicly", "sources": ["rhino-part2"]},

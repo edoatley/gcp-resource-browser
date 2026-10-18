@@ -91,7 +91,10 @@ the user runs `gcloud auth application-default login` first. This is a deliberat
 - `app/output.py` — JSON/CSV emitters for the CLI.
 - `app/role_risk.py` + `app/role_risk_rules.json` — which permissions make a role high/medium
   risk. Every rule cites a quoted source; `docs/ROLE_RISK.md` must list every rule and source
-  (a test enforces it). Change a rule only with a source.
+  (a test enforces it). Change a rule only with a source, and check the quote against the page
+  itself. Every rule's permission must exist in `tests/fixtures/iam_permissions.txt.gz`; run
+  `scripts/check-rule-permissions.sh` against the live catalogue. A dead rule fails silently.
+  Site downgrades need `"downgrade": true` and are named in every coverage note.
 - `app/core.py` billing section — `search_billing_grants`, the only path that does not go
   through CAI.
 - `app/gcloud.py` — renders a search as its `gcloud` equivalent for `--show-gcloud`. It reuses

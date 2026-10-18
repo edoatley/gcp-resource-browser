@@ -258,15 +258,21 @@ instead of guessing at the cause.
 
 1. Add it to `app/role_risk_rules.json` with a `reason` and at least one `sources` id, and add
    the source itself if it is new. **A rule without a source does not go in** — the point of
-   the ruleset is that a reviewer can check it rather than trust it.
+   the ruleset is that a reviewer can check it rather than trust it. Check the quote against
+   the page itself, not a summary of it.
 2. Document it in [ROLE_RISK.md](ROLE_RISK.md). `tests/test_role_risk.py` fails if any rule or
    source URL is missing from that page.
-3. Nothing else: `/v1/roles`, `/v1/grants` and `/v1/billing-grants` all read the same ruleset,
+3. Run `scripts/check-rule-permissions.sh`. If the permission is newer than the snapshot,
+   refresh it with `uv run python -m scripts._snapshot_permissions`.
+   `tests/test_role_risk_guardrails.py` fails for a permission that is in no predefined role.
+4. Nothing else: `/v1/roles`, `/v1/grants` and `/v1/billing-grants` all read the same ruleset,
    so one change reaches all three. Do not add a role-name list beside it, or they can
    disagree.
 
 Sites can add rules without a code change via `role_risk_rules` in
 [configuration](CONFIGURATION.md); a site rule replaces a default for the same permission.
+Lowering a default needs `"downgrade": true`, and the downgrade is then named in every
+coverage note.
 
 ### Adding a command or endpoint
 

@@ -41,7 +41,7 @@ the file and point `GCP_EXPLORER_CONFIG` at it.
 | `asset_types` | Friendly name → CAI asset type. Adds to the built-in names; reusing a built-in name replaces it. |
 | `noise_rules` | Extra suppression rules. Each needs `asset_type` (exact match) and `reason`, which is shown to users, so keep it short. An optional `name` is a regex matched against the resource's short name, so a rule can hide only some resources of a type. An optional `note` is documentation only. |
 | `unsuppress` | CAI asset types whose **built-in** rules are switched off. Rules you add yourself are not affected. |
-| `role_risk_rules` | Extra or overriding [role risk](ROLE_RISK.md) rules: `permission`, `risk` (`high` or `medium`), `reason`, and optional `sources`. A site rule for a permission **replaces** the built-in rule, so you can raise or lower a level. |
+| `role_risk_rules` | Extra or overriding [role risk](ROLE_RISK.md) rules: `permission`, `risk` (`high` or `medium`), `reason`, optional `sources` (ids of the [built-in sources](ROLE_RISK.md#sources)), and `downgrade`. A site rule for a permission **replaces** the built-in rule. Raising a level needs nothing more. **Lowering** one is rejected unless the rule says `"downgrade": true`, and every `roles`, `grants` and `billing-grants` coverage note then names it, because a lowered rule stops reporting grants without any other sign. Unknown keys and unknown source ids are rejected. |
 
 Unknown top-level keys are rejected, not ignored, so a misspelled key cannot leave you thinking
 a setting was applied when it wasn't. Malformed JSON, or a rule without `asset_type` or

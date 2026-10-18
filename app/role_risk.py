@@ -131,6 +131,35 @@ def load_rules() -> tuple[RiskRule, ...]:
     return tuple(rules.values())
 
 
+def site_downgrades() -> list[tuple[str, str, str]]:
+    """(permission, built-in risk, site risk) for each confirmed site downgrade."""
+    from app.config import load_config  # imported here to avoid a cycle
+
+    with RULES_FILE.open() as handle:
+        builtin = {r["permission"]: r["risk"] for r in json.load(handle)["rules"]}
+    return [
+        (raw["permission"], builtin[raw["permission"]], raw["risk"])
+        for raw in load_config().extra_role_risk_rules
+        if raw.get("downgrade")
+    ]
+
+
+def downgrade_note() -> str:
+    """A sentence naming every site downgrade, or "" when there are none.
+
+    Appended to every roles, grants and billing-grants coverage note: a site
+    that weakens the ruleset must say so in each answer it weakens.
+    """
+    lowered = site_downgrades()
+    if not lowered:
+        return ""
+    listed = ", ".join(f"{p} ({was} -> {now})" for p, was, now in lowered)
+    return (
+        f"This site's config lowers {len(lowered)} built-in risk rule(s), so grants that "
+        f"would otherwise be reported may be missing: {listed}."
+    )
+
+
 @lru_cache(maxsize=1)
 def load_sources() -> dict[str, Source]:
     with RULES_FILE.open() as handle:

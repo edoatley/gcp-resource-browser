@@ -19,6 +19,8 @@ except `setup-gcp.sh`.
 | `gcloud-list-projects.sh` / `_explorer_projects.py` | The two sides of `compare-projects.sh`, as sorted `project_id<TAB>number` lines |
 | `compare-member-expansion.sh` | Diff `--expand-members` against gcloud: project roles via Resource Manager `getIamPolicy` (the tool uses CAI), groups via `gcloud identity` |
 | `gcloud-expand-members.sh` / `_explorer_expansions.py` | The two sides of `compare-member-expansion.sh`, as sorted `member<TAB>principal` lines |
+| `check-rule-permissions.sh` | Checks every role risk rule (and, given a site config, its rules) against the live IAM catalogue and the permissions testable on a project (`--project`, default gcloud's). It reports `UNKNOWN` for a typo, `NO-ROLE` for a real permission no predefined role grants, and `WARN` for `DEPRECATED`, and exits non-zero for the first two. |
+| `_snapshot_permissions.py` | Refreshes `tests/fixtures/iam_permissions.txt.gz`, the offline copy that check's unit test uses |
 | `check-noise.sh` | Checks that the noise-suppressed result is a strict subset of the full result |
 | `benchmark.py` | Records a latency baseline for the delivery plan |
 

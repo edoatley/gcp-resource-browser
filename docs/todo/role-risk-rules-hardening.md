@@ -1,11 +1,17 @@
-# Phase 10 — Harden the role risk rules
+# Phase 10, part 2 — candidate risk rules
 
-**Summary:** Act on an external review of `app/role_risk_rules.json`. Add the escalation paths it
-misses, close the validation gaps that let a bad rule pass silently, and make site downgrades
-loud. Every rule decides what `roles`, `grants` and `billing-grants` report.
+**Summary:** Add the escalation paths an external review of `app/role_risk_rules.json` says it
+misses, each one checked live and given a quoted primary source. Every rule decides what
+`roles`, `grants` and `billing-grants` report.
 
-**Branch context:** `main` after `8920b40`. Raised while Phase 9 PR 1 (#5, capability
-catalogue) was in review. Branch fresh from `main`.
+**Branch context:** Part 1 (the guardrails, branch `phase-10-role-risk-hardening`) shipped
+three things:
+- the permission-existence check: the snapshot test plus `scripts/check-rule-permissions.sh`;
+- source-coverage checks;
+- confirmed-only site downgrades.
+
+It also replaced a dead rule (`serviceusage.apiKeys.create` → `apikeys.keys.create`). This is
+what remains. Branch fresh from `main`.
 
 ## Why deferred
 
@@ -25,9 +31,10 @@ than an addition to #5.
 - `scripts/compare-roles.sh`, `gcloud-search-grants.sh`, `gcloud-billing-grants.sh` — read
   the same JSON with `jq`. They validate the classifier, **not** the rule content.
 
-**Current state:** Rules match exact permission strings, and nothing checks that a permission
-exists in Google's catalogue. A typo or a retired permission matches nothing and fails
-silently. A site rule can silently downgrade a default (high → medium).
+**Current state:** 22 rules and 11 sources. Every rule's permission is checked against
+`tests/fixtures/iam_permissions.txt.gz`. Refresh it with
+`uv run python -m scripts._snapshot_permissions` if a candidate is newer than the snapshot.
+`scripts/check-rule-permissions.sh` is the live check.
 
 **Key constraints:**
 - **No rule without a quoted source** (`docs/ARCHITECTURE.md`, "Adding a risk rule"). The
@@ -46,25 +53,15 @@ silently. A site rule can silently downgrade a default (high → medium).
   its own source.
 - The Rhino Part 1 quote does not list `cloudbuild.builds.create`. The review's attribution to
   Part 2 is unverified.
-- The review's claim that "all 22 permissions are valid" is an assertion, not a check. Step 1
-  makes it a check.
+- The review's claim that "all 22 permissions are valid" was **wrong**.
+  `serviceusage.apiKeys.create` was in no predefined role, and part 1 fixed it. Treat the
+  review's other factual claims with the same suspicion.
 
 ## What to do
 
-1. **Permission-existence check.**
-   - Unit test: every rule permission appears in some role's `includedPermissions` in a
-     committed snapshot (`tests/fixtures/`).
-   - Live script: `scripts/check-rule-permissions.sh` runs the same check against
-     `gcloud iam roles list --show-deleted=false` with full view, or
-     `gcloud iam list-testable-permissions`.
-   - Use the live script to confirm all 22 existing rules.
-2. **Source-coverage test.** Every source is cited by a rule or appears on `ROLE_RISK.md`, and
-   every rule's sources exist. Do the same check for site rules in `config.py`: a site rule
-   citing an unknown source id is a `ConfigError`.
-3. **Site downgrade protection.** Make a downgrade loud, not a log line that the API path
-   would lose. The approach isn't settled; ask the user:
-   - (a) reject a downgrade unless the rule sets an explicit `"downgrade": true`; or
-   - (b) allow it, but name it in every `coverage_note`.
+Steps 1–3 of the original plan (existence check, source coverage, downgrade protection) are
+done. Keep going with the numbering below.
+
 4. **Candidate rules.** Verify each live and source it before adding, and drop any that fail:
 
    | Permission | Proposed risk | Claim to verify |
@@ -84,15 +81,17 @@ silently. A site rule can silently downgrade a default (high → medium).
 6. **Batching.** At about 32 rules, a search with no member types sits at the one-batch
    boundary. Re-run `scripts/compare-grants.sh` and update the latency note if the batch
    count rises.
-7. Update `ROLE_RISK.md` per rule, `docs/CONFIGURATION.md` for steps 2 and 3, and the delivery
-   plan.
+7. Update `ROLE_RISK.md` for each rule, and the delivery plan. Each new permission must pass
+   `scripts/check-rule-permissions.sh`, and each quote must be checked against the page itself
+   rather than a summary of it.
 
 ## Acceptance criteria
 
-- [ ] A rule with a non-existent permission fails a unit test, and the live script confirms
-      every rule
-- [ ] A source cited nowhere, or a site rule citing an unknown source, fails
-- [ ] A site downgrade can't happen silently
+- [x] A rule with a non-existent permission fails a unit test, and the live script confirms
+      every rule (part 1)
+- [x] A source cited nowhere, or a site rule citing an unknown source, fails (part 1)
+- [x] A site downgrade can't happen silently (part 1)
+- [ ] Every new rule passes `check-rule-permissions.sh`
 - [ ] Each new rule has a primary source whose quote supports its reason, and is listed on
       `ROLE_RISK.md`
 - [ ] `compare-roles.sh` and `compare-grants.sh` match on the dev estate after the changes

@@ -4,9 +4,23 @@
 `GET /v1/billing-grants` classify IAM roles by risk. This page lists every rule and the published source behind it, quoted, so you can check
 the classification rather than take it on trust.
 
-The rules live in [`app/role_risk_rules.json`](../app/role_risk_rules.json). A test checks that
-every rule cites a source, that every source has a URL and a quote, and that this page lists
-every rule.
+The rules live in [`app/role_risk_rules.json`](../app/role_risk_rules.json). Tests check that:
+
+- every rule cites a source;
+- every source has a URL and a quote, and is cited by a rule or linked from this page;
+- this page lists every rule;
+- every rule's permission is granted by at least one predefined role. A rule matches an exact
+  permission string, so a typo or a retired permission would otherwise match nothing,
+  silently. This check runs against a committed snapshot
+  (`tests/fixtures/iam_permissions.txt.gz`). `scripts/check-rule-permissions.sh` runs it live,
+  and also asks IAM which permissions exist at all (`queryTestablePermissions`, the API behind
+  `gcloud iam list-testable-permissions`). That separates a typo (`UNKNOWN`) from a real
+  permission no standard role grants (`NO-ROLE`), and flags `DEPRECATED` ones.
+
+  When it was introduced, it caught `serviceusage.apiKeys.create` as `NO-ROLE`. The permission
+  still exists (BETA), but no predefined role grants it, and the API Keys API checks
+  `apikeys.keys.create` for key creation ([gcp-api-keys-iam](#gcp-api-keys-iam)). The rule now
+  names that permission.
 
 ## How risk is decided
 
@@ -74,7 +88,7 @@ live from Google's catalogue.
 | `orgpolicy.policy.set` | high | Can disable organization policy guardrails | [rhino-part2](#rhino-part2) |
 | `deploymentmanager.deployments.create` | high | Deploys as the Google APIs service account, which has Editor by default | [rhino-part1](#rhino-part1) |
 | `storage.hmacKeys.create` | medium | Can mint Cloud Storage HMAC keys for a service account | [rhino-part2](#rhino-part2) |
-| `serviceusage.apiKeys.create` | medium | Can create unrestricted API keys | [rhino-part2](#rhino-part2) |
+| `apikeys.keys.create` | medium | Can create API keys, which are unrestricted by default. The API Keys API checks this permission; the older `serviceusage.apiKeys.create` that Rhino names still exists but no predefined role grants it | [gcp-api-keys-iam](#gcp-api-keys-iam), [gcp-api-keys](#gcp-api-keys), [rhino-part2](#rhino-part2) |
 | `storage.buckets.setIamPolicy` | medium | Can grant access to a bucket, including publicly | [rhino-part2](#rhino-part2) |
 | `secretmanager.secrets.setIamPolicy` | medium | Can grant access to a secret | [rhino-part2](#rhino-part2) |
 | `cloudfunctions.functions.setIamPolicy` | medium | Can grant invoke access to a function, including publicly | [rhino-part2](#rhino-part2) |
@@ -135,6 +149,18 @@ every deployer role without finding anything new.
 
 > Assign the Service Account User (iam.serviceAccountUser) and Service Account Token Creator (iam.serviceAccountTokenCreator) roles to a user for a specific service account rather than assigning the role to a user at project level.
 
+### gcp-api-keys-iam
+
+**[Google Cloud API Keys: Access control with IAM](https://docs.cloud.google.com/api-keys/docs/access-control)**
+
+> API Keys uses Identity and Access Management to manage access to the keys. ... Method Required Permission(s) projects.locations.keys.create apikeys.keys.create
+
+### gcp-api-keys
+
+**[Google Cloud authentication: Manage API keys](https://docs.cloud.google.com/docs/authentication/api-keys)**
+
+> Unrestricted API keys are insecure. To reduce security risks, you can restrict API keys
+
 ### rhino-part1
 
 **[Rhino Security Labs (Spencer Gietzen): Privilege Escalation in Google Cloud Platform -- Part 1 (IAM)](https://rhinosecuritylabs.com/gcp/privilege-escalation-google-cloud-platform-part-1/)**
@@ -194,9 +220,13 @@ Every response states this in `coverage_note`:
 gcpe roles --risk high                                    # the live classification
 gcpe roles --risk high -o json | jq '.sources'            # sources cited by the roles returned
 ./scripts/compare-grants.sh --scope organizations/123     # tool vs gcloud, one search per permission
+./scripts/check-rule-permissions.sh                       # every rule names a real permission
+./scripts/check-rule-permissions.sh gcp-explorer.json     # ... including your site rules
 ```
 
 ## Changing the rules
 
 Add, override or downgrade a rule for your site in [configuration](CONFIGURATION.md), under
-`role_risk_rules`. A site rule for a permission replaces the default rule for it.
+`role_risk_rules`. A site rule for a permission replaces the default rule for it. A downgrade
+must say `"downgrade": true`, and every coverage note then names it. A site rule may cite only
+the sources listed above.

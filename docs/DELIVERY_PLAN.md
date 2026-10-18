@@ -702,7 +702,7 @@ The catalogue plus its staleness test is the valuable half and is useful on its 
 drift between the surfaces and the documentation a build failure rather than something a
 reader notices months later. The page is a renderer over it. Build them in that order.
 
-## Phase 10 — Harden the role risk rules ☐
+## Phase 10 — Harden the role risk rules ◐
 
 **Goal:** make `app/role_risk_rules.json` checkable, not just cited. An external review
 (2026-10) found escalation paths the rules miss where `iam.serviceAccounts.actAs` is not
@@ -713,11 +713,26 @@ the review's claims were wrong on inspection; the handoff records which.
 Written up as a pickup-ready item in
 [`docs/todo/role-risk-rules-hardening.md`](todo/role-risk-rules-hardening.md).
 
-- ☐ Every rule permission must exist in the IAM catalogue: a unit test on a snapshot, plus a
-  live script.
-- ☐ Every source must be cited by a rule or by `ROLE_RISK.md`, and site rules may cite only
-  known sources.
-- ☐ A site rule may not downgrade a default silently.
+- ☑ Every rule permission must exist in the IAM catalogue. A unit test checks
+  `tests/fixtures/iam_permissions.txt.gz` (14,063 permissions, refreshed by
+  `scripts._snapshot_permissions`), and `scripts/check-rule-permissions.sh` checks the live
+  catalogue. It also asks which permissions exist at all (`queryTestablePermissions`, the API
+  behind `gcloud iam list-testable-permissions`), so it can tell a typo (`UNKNOWN`) from a real
+  permission that no predefined role grants (`NO-ROLE`). It also flags `DEPRECATED`.
+  **On its first run it found a dead rule:** `serviceusage.apiKeys.create` still exists (BETA)
+  but no predefined role grants it, and the API Keys API checks `apikeys.keys.create`
+  (contrary to the review's "all 22 are valid"). The rule now uses `apikeys.keys.create`, with
+  two quoted Google sources checked against the live pages. Live on 2026-10-18:
+  - a deliberate typo came back `UNKNOWN` and the old name `NO-ROLE`;
+  - all 22 rules passed, in about 20 seconds;
+  - `compare-roles.sh` matched at high (95) and medium (118, up from 117, because
+    `roles/serviceusage.apiKeysAdmin` is newly classified);
+  - `compare-grants.sh` matched on two projects.
+- ☑ Every source must be cited by a rule or linked from `ROLE_RISK.md`, and site rules may cite
+  only known sources (`ConfigError` otherwise). Site rules also reject unknown keys.
+- ☑ A site rule may not downgrade a default silently. A downgrade is rejected unless it sets
+  `"downgrade": true`, and is then named in every roles, grants and billing-grants coverage
+  note. `"downgrade": true` on a rule that lowers nothing is also rejected.
 - ☐ Candidate rules, each verified live and given a primary source before being added.
 
 ## Sequencing rationale

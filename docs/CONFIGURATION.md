@@ -45,7 +45,8 @@ the file and point `GCP_EXPLORER_CONFIG` at it.
 
 Unknown top-level keys are rejected, not ignored, so a misspelled key cannot leave you thinking
 a setting was applied when it wasn't. Malformed JSON, or a rule without `asset_type` or
-`reason`, also stops the tool at startup.
+`reason`, also stops the tool at startup. It prints one line naming the file and the problem,
+and exits with code `8`.
 
 `--show-all` / `?show_all=true` still disables every rule, including site rules, and anything
 hidden by a site rule is reported with its `reason` just like a built-in one.

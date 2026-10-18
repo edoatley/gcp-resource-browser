@@ -126,6 +126,9 @@ Both wrappers are intentionally dumb: any new capability (filtering, aggregation
 belongs in the core so CLI and API stay in sync. Errors follow the same rule — the core raises
 a domain error, and each surface maps it to a status code (`app.api._STATUS_BY_ERROR`) or an
 exit code (`app.cli._EXIT_BY_ERROR`). Adding an error means adding it in all three places.
+The exception is `ConfigError`: the config is read while `app.core` is imported, before the CLI
+exists, so the console scripts enter through `app.main:main`, which catches it and exits 8.
+Don't point them back at `app.cli:cli`.
 
 **Adding a filter:** add it to `Help` and `SearchFilters` in `app/params.py`, handle it in
 `build_query`, add it to `core._cache_key`, then reference `Help.X` from both surfaces and pass

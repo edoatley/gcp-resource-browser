@@ -17,9 +17,10 @@ dependencies = [
 
 [project.scripts]
 # `gcpe` is the documented name. `gcp-explorer` is kept as an alias so existing
-# scripts and habits keep working; both point at the same Typer app.
-gcpe = "app.cli:cli"
-gcp-explorer = "app.cli:cli"
+# scripts and habits keep working. Both go through app.main, which turns an
+# invalid site config into a clean error rather than an import-time traceback.
+gcpe = "app.main:main"
+gcp-explorer = "app.main:main"
 
 [build-system]
 requires = ["hatchling"]

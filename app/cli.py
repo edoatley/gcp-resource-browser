@@ -14,10 +14,12 @@ from pathlib import Path
 import typer
 import uvicorn
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from app import core
 from app.aggregate import summarise
+from app.expansion import short_label
 from app.fanout import DEFAULT_MAX_CONCURRENCY, search_scopes
 from app.gcloud import billing_grants_command, grants_command, roles_command, search_command
 from app.output import (
@@ -35,6 +37,7 @@ from app.params import (
     Help,
     SearchFilters,
 )
+from app.role_risk import member_type
 
 cli = typer.Typer(help="GCP Resource Explorer CLI", no_args_is_help=True)
 console = Console()
@@ -129,7 +132,7 @@ def _search_many(
         else:
             console.print("[yellow]No resources found.[/yellow]")
         for note in notes:
-            console.print(f"[dim]{note}[/dim]")
+            console.print(f"[dim]{note}[/dim]", highlight=False)
 
     # Failures are never silent: a partial answer that looks complete would
     # under-report the estate, which is the failure this tool exists to prevent.
@@ -480,7 +483,80 @@ def roles_command_cli(
     console.print(table)
     console.print(f"[dim]{roles.count} role(s). Sources: docs/ROLE_RISK.md[/dim]")
     for note in notes:
-        console.print(f"[dim]{note}[/dim]")
+        console.print(f"[dim]{note}[/dim]", highlight=False)
+
+
+# How each member type reads in a table. The type gets its own column, so
+# the member cell drops the `serviceAccount:` prefix and loses nothing.
+_MEMBER_TYPE_LABELS = {
+    "user": "user",
+    "serviceAccount": "service account",
+    "group": "group",
+    "domain": "domain",
+    "allUsers": "public",
+    "allAuthenticatedUsers": "any Google account",
+    "principal": "federated identity",
+    "principalSet": "federated set",
+    "projectOwner": "project owner",
+    "projectEditor": "project editor",
+    "projectViewer": "project viewer",
+    "deleted": "deleted",
+}
+
+
+def _member_type_label(member: str) -> str:
+    kind = member_type(member)
+    return _MEMBER_TYPE_LABELS.get(kind, kind)
+
+
+def _member_cell(member: str, result, typed: bool = False) -> str:
+    """A member without its type prefix, plus its count when expansion read one.
+
+    With `typed`, the type follows on a dim second line, which costs no column
+    on a narrow terminal. Tables only: JSON and CSV keep the exact member string. A federated member
+    is shortened to its pool and attribute, and `_shortened_notes` prints the
+    full form under the table so nothing is lost.
+    """
+    kind = member_type(member)
+    if short := short_label(member):
+        label = short
+    elif kind in ("principal", "principalSet") or ":" not in member:
+        label = member  # nothing to strip without losing meaning
+    else:
+        label = member.split(":", 1)[1]
+    label = escape(label)
+    found = (result.expansions or {}).get(member)
+    if found is not None and found.count is not None:
+        label += f" [bold]({found.count})[/bold]"
+    elif found is not None:
+        label += f" [dim]({'unreadable' if found.error else 'see below'})[/dim]"
+    return f"{label}\n[dim]{_member_type_label(member)}[/dim]" if typed else label
+
+
+def _shortened_notes(result) -> list[str]:
+    """The full form of each federated member shortened in the table above."""
+    explained = {m for m, e in (result.expansions or {}).items() if e.note}
+    members = sorted({g.member for g in result.grants})
+    return [
+        f"{short_label(m)} is {m}"
+        for m in members
+        if short_label(m) is not None and m not in explained
+    ]
+
+
+def _expansion_notes(result) -> list[str]:
+    """Explanations and failures for expanded members. Names stay in -o json."""
+    if result.expansions is None:
+        return []
+    notes = []
+    for member, found in result.expansions.items():
+        if found.note:
+            notes.append(f"{member}: {found.note}")
+        elif found.error:
+            notes.append(f"Could not expand {member}: {found.error}")
+    if any(f.members for f in result.expansions.values()):
+        notes.append("Counts are shown in brackets; -o json lists who they are.")
+    return notes
 
 
 @cli.command("grants")
@@ -490,6 +566,7 @@ def grants_command_cli(
     member_type: list[str] = typer.Option([], "--member-type", "-m", help=Help.MEMBER_TYPE),
     by: str | None = typer.Option(None, "--by", help=Help.GROUP_BY),
     show_all: bool = typer.Option(False, "--show-all", help=Help.SHOW_ALL_AGENTS),
+    expand_members: bool = typer.Option(False, "--expand-members", help=Help.EXPAND_MEMBERS),
     limit: int = typer.Option(DEFAULT_LIMIT, "--limit", "-n", min=1, help=Help.LIMIT),
     output: OutputFormat = typer.Option(OutputFormat.TABLE, "--output", "-o", help=Help.OUTPUT),
     show_gcloud: bool = typer.Option(
@@ -514,19 +591,23 @@ def grants_command_cli(
                     show_all=show_all,
                     limit=limit,
                     group_by=by,
+                    expand_members=expand_members,
                 )
             )
     except core.ResourceExplorerError as exc:
         raise _fail(exc) from exc
 
     if show_gcloud:
-        _print_gcloud(grants_command(scope, result.queries, billing_project), output)
+        _print_gcloud(
+            grants_command(scope, result.queries, billing_project, expand=expand_members), output
+        )
 
     notes = [result.coverage_note]
     if result.truncated:
         notes.append(f"Showing the first {limit} grants; more exist. Use --limit to raise the cap.")
     if result.suppressed_summary:
         notes.append(result.suppressed_summary)
+    notes.extend(_expansion_notes(result))
 
     if output is not OutputFormat.TABLE:
         print(
@@ -539,38 +620,55 @@ def grants_command_cli(
             err_console.print(note)
         return
 
+    notes.extend(_shortened_notes(result))
     if not result.grants:
         console.print(f"[green]No {result.min_risk}-risk grants found.[/green]")
     elif result.groups is not None:
-        table = Table(title=f"{result.min_risk.capitalize()}-risk grants in {scope}, by {by}")
-        table.add_column(by.capitalize(), style="cyan", overflow="fold")
+        table = Table(
+            title=f"{result.min_risk.capitalize()}-risk grants in {scope}, by {by}",
+            expand=True,
+            show_lines=True,
+        )
+        # Members are long (principalSet://... runs past 150 characters) and are
+        # the point of the table, so they get the larger share of a narrow
+        # terminal; role names wrap instead of starving them.
+        table.add_column(by.capitalize(), style="cyan", overflow="fold", ratio=3, min_width=24)
         table.add_column("Risk")
-        table.add_column("Roles" if by == "member" else "Members", no_wrap=by == "member")
+        table.add_column("Roles" if by == "member" else "Members", overflow="fold", ratio=2)
         table.add_column("Resources", justify="right")
         for group in result.groups:
             table.add_row(
-                group.key,
+                _member_cell(group.key, result, typed=True) if by == "member" else group.key,
                 f"[{_risk_style(group.highest_risk)}]{group.highest_risk}[/]",
-                "\n".join(group.roles or group.members or []),
+                "\n".join(
+                    group.roles
+                    or [
+                        f"{_member_cell(m, result)} [dim]· {_member_type_label(m)}[/dim]"
+                        for m in group.members or []
+                    ]
+                ),
                 str(group.resource_count),
             )
         console.print(table)
     else:
-        table = Table(title=f"{result.min_risk.capitalize()}-risk grants in {scope}")
+        # Cells span several lines (member, then its type), so rows need dividers.
+        table = Table(
+            title=f"{result.min_risk.capitalize()}-risk grants in {scope}", show_lines=True
+        )
         table.add_column("Member", style="cyan", overflow="fold")
         table.add_column("Role", style="magenta", no_wrap=True)
         table.add_column("Risk")
         table.add_column("On", overflow="fold")
         for grant in result.grants:
             table.add_row(
-                grant.member,
+                _member_cell(grant.member, result, typed=True),
                 grant.role + (" [dim](conditional)[/dim]" if grant.condition else ""),
                 f"[{_risk_style(grant.risk)}]{grant.risk}[/]",
                 grant.resource.removeprefix("//"),
             )
         console.print(table)
     for note in notes:
-        console.print(f"[dim]{note}[/dim]")
+        console.print(f"[dim]{note}[/dim]", highlight=False)
 
 
 @cli.command("billing-grants")
@@ -579,6 +677,7 @@ def billing_grants_command_cli(
     member_type: list[str] = typer.Option([], "--member-type", "-m", help=Help.MEMBER_TYPE),
     by: str | None = typer.Option(None, "--by", help=Help.GROUP_BY),
     show_all: bool = typer.Option(False, "--show-all", help=Help.SHOW_ALL_AGENTS),
+    expand_members: bool = typer.Option(False, "--expand-members", help=Help.EXPAND_MEMBERS),
     limit: int = typer.Option(DEFAULT_LIMIT, "--limit", "-n", min=1, help=Help.LIMIT),
     output: OutputFormat = typer.Option(OutputFormat.TABLE, "--output", "-o", help=Help.OUTPUT),
     show_gcloud: bool = typer.Option(
@@ -600,13 +699,14 @@ def billing_grants_command_cli(
                     show_all=show_all,
                     limit=limit,
                     group_by=by,
+                    expand_members=expand_members,
                 )
             )
     except core.ResourceExplorerError as exc:
         raise _fail(exc) from exc
 
     if show_gcloud:
-        _print_gcloud(billing_grants_command(result.accounts), output)
+        _print_gcloud(billing_grants_command(result.accounts, expand=expand_members), output)
 
     notes = [f"{len(result.accounts)} billing account(s) read.", result.coverage_note]
     if result.truncated:
@@ -619,6 +719,7 @@ def billing_grants_command_cli(
             f"in the rows above: {', '.join(result.unclassified_roles)}. They are not in the "
             "predefined catalogue, so their permissions are unknown here; review them by hand."
         )
+    notes.extend(_expansion_notes(result))
 
     if output is not OutputFormat.TABLE:
         print(
@@ -631,6 +732,7 @@ def billing_grants_command_cli(
             err_console.print(note)
         return
 
+    notes.extend(_shortened_notes(result))
     if not result.accounts:
         console.print(
             "[yellow]No billing accounts visible to these credentials.[/yellow] "
@@ -639,21 +741,36 @@ def billing_grants_command_cli(
     elif not result.grants:
         console.print(f"[green]No {result.min_risk}-risk billing grants found.[/green]")
     elif result.groups is not None:
-        table = Table(title=f"{result.min_risk.capitalize()}-risk billing grants, by {by}")
-        table.add_column(by.capitalize(), style="cyan", overflow="fold")
+        table = Table(
+            title=f"{result.min_risk.capitalize()}-risk billing grants, by {by}",
+            expand=True,
+            show_lines=True,
+        )
+        # Members are long (principalSet://... runs past 150 characters) and are
+        # the point of the table, so they get the larger share of a narrow
+        # terminal; role names wrap instead of starving them.
+        table.add_column(by.capitalize(), style="cyan", overflow="fold", ratio=3, min_width=24)
         table.add_column("Risk")
-        table.add_column("Roles" if by == "member" else "Members", no_wrap=by == "member")
+        table.add_column("Roles" if by == "member" else "Members", overflow="fold", ratio=2)
         table.add_column("Accounts", justify="right")
         for group in result.groups:
             table.add_row(
-                group.key,
+                _member_cell(group.key, result, typed=True) if by == "member" else group.key,
                 f"[{_risk_style(group.highest_risk)}]{group.highest_risk}[/]",
-                "\n".join(group.roles or group.members or []),
+                "\n".join(
+                    group.roles
+                    or [
+                        f"{_member_cell(m, result)} [dim]· {_member_type_label(m)}[/dim]"
+                        for m in group.members or []
+                    ]
+                ),
                 str(group.resource_count),
             )
         console.print(table)
     else:
-        table = Table(title=f"{result.min_risk.capitalize()}-risk billing account grants")
+        table = Table(
+            title=f"{result.min_risk.capitalize()}-risk billing account grants", show_lines=True
+        )
         table.add_column("Member", style="cyan", overflow="fold")
         table.add_column("Role", style="magenta", no_wrap=True)
         table.add_column("Risk")
@@ -661,14 +778,14 @@ def billing_grants_command_cli(
         for grant in result.grants:
             account = grant.resource.rsplit("/", 1)[-1]
             table.add_row(
-                grant.member,
+                _member_cell(grant.member, result, typed=True),
                 grant.role + (" [dim](conditional)[/dim]" if grant.condition else ""),
                 f"[{_risk_style(grant.risk)}]{grant.risk}[/]",
                 f"{account} ({grant.display_name})" if grant.display_name else account,
             )
         console.print(table)
     for note in notes:
-        console.print(f"[dim]{note}[/dim]")
+        console.print(f"[dim]{note}[/dim]", highlight=False)
 
 
 @cli.command("openapi")

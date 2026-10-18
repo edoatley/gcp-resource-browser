@@ -625,6 +625,19 @@ paths:
           default: false
           title: Show All
         description: Include Google-managed service agents, hidden by default
+      - name: expand_members
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: 'Show who is behind members that stand for other principals:
+            a group (via Cloud Identity), or projectOwner/Editor/Viewer (from that
+            project''s attached policy). Off by default, because it lists named people.'
+          default: false
+          title: Expand Members
+        description: 'Show who is behind members that stand for other principals:
+          a group (via Cloud Identity), or projectOwner/Editor/Viewer (from that project''s
+          attached policy). Off by default, because it lists named people.'
       - name: limit
         in: query
         required: false
@@ -747,6 +760,19 @@ paths:
           default: false
           title: Show All
         description: Include Google-managed service agents, hidden by default
+      - name: expand_members
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: 'Show who is behind members that stand for other principals:
+            a group (via Cloud Identity), or projectOwner/Editor/Viewer (from that
+            project''s attached policy). Off by default, because it lists named people.'
+          default: false
+          title: Expand Members
+        description: 'Show who is behind members that stand for other principals:
+          a group (via Cloud Identity), or projectOwner/Editor/Viewer (from that project''s
+          attached policy). Off by default, because it lists named people.'
       - name: limit
         in: query
         required: false
@@ -878,6 +904,15 @@ components:
           - type: 'null'
           title: Groups
           description: Present when group_by was requested
+        expansions:
+          anyOf:
+          - additionalProperties:
+              $ref: '#/components/schemas/MemberExpansion'
+            type: object
+          - type: 'null'
+          title: Expansions
+          description: 'Present when expand_members was requested: each member in
+            the results that stands for other principals, and who those are'
       type: object
       required:
       - min_risk
@@ -961,6 +996,13 @@ components:
           - type: 'null'
           title: Condition
           description: IAM condition expression, when the binding is conditional
+        member_count:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Member Count
+          description: How many principals the member stands for, when expand_members
+            was requested and it could be read. Names are in the response's `expansions`.
       type: object
       required:
       - resource
@@ -1069,6 +1111,15 @@ components:
           - type: 'null'
           title: Groups
           description: Present when group_by was requested
+        expansions:
+          anyOf:
+          - additionalProperties:
+              $ref: '#/components/schemas/MemberExpansion'
+            type: object
+          - type: 'null'
+          title: Expansions
+          description: 'Present when expand_members was requested: each member in
+            the results that stands for other principals, and who those are'
       type: object
       required:
       - scope
@@ -1108,6 +1159,43 @@ components:
       - members
       title: IamBinding
       description: One role granted to a set of members on a resource.
+    MemberExpansion:
+      properties:
+        kind:
+          type: string
+          title: Kind
+          description: group, projectOwner, projectEditor, projectViewer, ...
+        members:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Members
+          description: The principals it stands for; [] means read and empty, null
+            means not read
+        count:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Count
+        note:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Note
+          description: What the member means, when it cannot be listed
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+          description: Why it could not be read
+      type: object
+      required:
+      - kind
+      title: MemberExpansion
+      description: Who is behind one member that stands for other principals.
     Resource:
       properties:
         full_name:

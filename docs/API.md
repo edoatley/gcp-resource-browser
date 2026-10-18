@@ -230,9 +230,10 @@ permission and done by CAI, so custom roles are covered too.
 |:---|:---|:---|:---|
 | `scope` | string, **required** | | Search the organization to include grants made at every level |
 | `role_risk` | `high` \| `medium` | `high` | Lowest role risk included |
-| `member_type` | repeatable | all | `user`, `group`, `serviceAccount`, `domain`, `allUsers`, `allAuthenticatedUsers`, `principal`, `principalSet` |
+| `member_type` | repeatable | all | `user`, `group`, `serviceAccount`, `domain`, `allUsers`, `allAuthenticatedUsers`, `principal`, `principalSet`, `projectOwner`, `projectEditor`, `projectViewer` |
 | `group_by` | `member` \| `role` | | Add `groups`: what each principal holds, or who holds each role |
 | `show_all` | bool | `false` | Include grants to Google service agents |
+| `expand_members` | bool | `false` | Add `expansions` and a per-grant `member_count`: who is behind each group or `projectOwner`/`Editor`/`Viewer` member. See [Concepts](CONCEPTS.md#who-is-behind-a-member). |
 | `limit` | int, 1–10000 | `1000` | Maximum grants returned. `truncated` reports when more exist. |
 
 ```bash
@@ -248,7 +249,7 @@ curl -s 'http://127.0.0.1:8000/v1/grants?scope=organizations/123&role_risk=high&
   "count": 1,
   "truncated": false,
   "suppressed": 0,
-  "coverage_note": "Covers the organization and everything beneath it. Billing account IAM is not indexed by Cloud Asset Inventory and is not included here; run `gcpe billing-grants` (GET /v1/billing-grants) for it. Group membership is not expanded: a group grant applies to every member.",
+  "coverage_note": "Covers the organization and everything beneath it. Billing account IAM is not indexed by Cloud Asset Inventory and is not included here; run `gcpe billing-grants` (GET /v1/billing-grants) for it. Group membership is not expanded: a group grant applies to every member. Pass expand_members to see who is behind groups and projectOwner/Editor/Viewer members.",
   "grants": [
     {
       "resource": "//cloudresourcemanager.googleapis.com/organizations/123",
@@ -290,6 +291,7 @@ any scope. This reads the Cloud Billing API instead: one `billingAccounts.list`,
 | `member_type` | repeatable | all | As for `/v1/grants` |
 | `group_by` | `member` \| `role` | | Add `groups`: what each principal holds, or who holds each role |
 | `show_all` | bool | `false` | Include grants to Google service agents |
+| `expand_members` | bool | `false` | Add `expansions` and a per-grant `member_count`: who is behind each group or `projectOwner`/`Editor`/`Viewer` member. See [Concepts](CONCEPTS.md#who-is-behind-a-member). |
 | `limit` | int, 1–10000 | `1000` | Maximum grants returned. `truncated` reports when more exist. |
 
 ```bash

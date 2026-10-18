@@ -215,6 +215,11 @@ CAPABILITIES: tuple[Capability, ...] = (
                 "Users only, rolled up by member",
                 {"scope": SCOPE, "member_type": ["user"], "group_by": "member"},
             ),
+            Example(
+                "who-is-behind",
+                "With groups and project roles expanded into who they are",
+                {"scope": SCOPE, "role_risk": "medium", "expand_members": True},
+            ),
         ),
     ),
     Capability(
@@ -463,11 +468,12 @@ def to_gcloud(
             args["scope"],
             core.grant_queries(minimum, args.get("member_type", [])),
             billing_project,
+            expand=bool(args.get("expand_members")),
         )
     if capability.id == "roles":
         return gcloud.roles_command(args.get("scope"), args.get("risk", "high"))
     if capability.id == "billing-grants":
-        return gcloud.billing_grants_command()
+        return gcloud.billing_grants_command(expand=bool(args.get("expand_members")))
     raise KeyError(f"No gcloud renderer for {capability.id}")
 
 

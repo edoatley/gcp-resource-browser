@@ -194,3 +194,42 @@ def test_projects_helper_emits_sorted_tsv(monkeypatch, capsys) -> None:
     assert _explorer_projects.main() == 0
     assert capsys.readouterr().out.splitlines() == ["alpha\t1", "zeta\t2"]
     core._VISIBLE_PROJECTS.clear()
+
+
+def test_expansions_helper_emits_sorted_tsv_and_fails_on_unreadable(monkeypatch, capsys) -> None:
+    from scripts import _explorer_expansions
+    from tests.conftest import make_iam_result
+
+    def client_with(project_policy_members):
+        return FakeAssetClient(
+            iam_policies=[
+                make_iam_result(
+                    resource="//storage.googleapis.com/buckets/b",
+                    role="roles/storage.legacyBucketOwner",
+                    members=("projectOwner:p", "projectEditor:p"),
+                    matched={"roles/storage.legacyBucketOwner": ["storage.buckets.setIamPolicy"]},
+                ),
+                make_iam_result(
+                    resource="//cloudresourcemanager.googleapis.com/projects/p",
+                    role="roles/owner",
+                    members=project_policy_members,
+                ),
+            ]
+        )
+
+    monkeypatch.setattr(core, "get_client", lambda: client_with(("user:b@x.com", "user:a@x.com")))
+    monkeypatch.setattr("sys.argv", ["_explorer_expansions", "--scope", "projects/p"])
+
+    assert _explorer_expansions.main() == 0
+    assert capsys.readouterr().out.splitlines() == [
+        "projectEditor:p\t-",
+        "projectOwner:p\tuser:a@x.com",
+        "projectOwner:p\tuser:b@x.com",
+    ]
+
+    def denied(project, role, client=None):
+        raise core.ScopeAccessDenied("no")
+
+    monkeypatch.setattr(core, "project_role_members", denied)
+    assert _explorer_expansions.main() == 1
+    assert "could not expand projectOwner:p" in capsys.readouterr().err

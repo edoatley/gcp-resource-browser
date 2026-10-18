@@ -158,3 +158,22 @@ organization or project; IAM has no folder-level custom roles, so a folder scope
 scope: billing accounts sit outside the resource hierarchy, so there is nothing to bound them
 by. Role names are all that API returns, so risk is resolved against the predefined catalogue
 and a role that is not in it is reported as unclassified rather than assumed safe.
+
+### Who is behind a member
+
+Some members are not one principal, and the headcount behind them is usually the finding.
+`expand_members` (`--expand-members`) reads them. It is off by default, because it turns an
+infrastructure audit into a list of named people.
+
+| Member | What is read |
+|:---|:---|
+| `group:…` | Its members through the Cloud Identity Groups API, with nested groups flattened. Needs `cloudidentity.googleapis.com` on the quota project and a Groups Reader *directory* role. Groups owned by a personal Google account cannot be read. |
+| `projectOwner:p`, `projectEditor:p`, `projectViewer:p` | Who holds Owner / Editor / Viewer in the policy attached to project `p`, read through Cloud Asset Inventory, so no extra role is needed. These usually appear on legacy storage roles. |
+| `principalSet://…` | Explained, not listed: which workload identity pool and which attribute. Federated identities are issued outside Google. |
+| `domain:`, `allUsers`, `allAuthenticatedUsers` | Explained, not listed. |
+
+Expansion is **one level deep and attached-only**. A group inside a project role is listed, not
+expanded again, and owners inherited from a folder or organization are not counted. A row is
+still one binding: expansion adds `member_count` to it and puts the names in `expansions`, so
+`group_by` and the CSV columns are unchanged. A member that cannot be read is listed with its
+error, and the coverage note names it. It still applies in full.

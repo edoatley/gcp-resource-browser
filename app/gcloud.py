@@ -95,7 +95,21 @@ def search_command(
     return "\n".join(lines)
 
 
-def grants_command(scope: str, queries: Sequence[str], billing_project: str | None = None) -> str:
+_EXPANSION_COMMANDS = [
+    "",
+    "# --expand-members: for each group: or projectOwner/Editor/Viewer: member above,",
+    "gcloud identity groups memberships search-transitive-memberships --group-email=GROUP",
+    "gcloud projects get-iam-policy PROJECT --flatten=bindings "
+    "--filter=bindings.role=roles/owner --format='value(bindings.members)'",
+]
+
+
+def grants_command(
+    scope: str,
+    queries: Sequence[str],
+    billing_project: str | None = None,
+    expand: bool = False,
+) -> str:
     """The gcloud command(s) for a risky-grant search: one per permission batch.
 
     gcloud returns whole policies, including bindings this tool narrows away
@@ -116,6 +130,8 @@ def grants_command(scope: str, queries: Sequence[str], billing_project: str | No
             lines.append("")
         flags = [f"--scope={shlex.quote(scope)}", f"--query={shlex.quote(query)}", *billing]
         lines.append(_command("search-all-iam-policies", flags))
+    if expand:
+        lines.extend(_EXPANSION_COMMANDS)
     return "\n".join(lines)
 
 
@@ -142,7 +158,7 @@ def roles_command(scope: str | None = None, min_risk: str = "high") -> str:
     return "\n".join(lines)
 
 
-def billing_grants_command(accounts: Sequence[str] = ()) -> str:
+def billing_grants_command(accounts: Sequence[str] = (), expand: bool = False) -> str:
     """The gcloud command(s) for a billing-account grant search.
 
     Billing account IAM is not in Cloud Asset Inventory, so there is no
@@ -162,4 +178,6 @@ def billing_grants_command(accounts: Sequence[str] = ()) -> str:
         lines.append("")
         lines.append("# Then, for each account listed above:")
         lines.append("gcloud billing accounts get-iam-policy BILLING_ACCOUNT_ID")
+    if expand:
+        lines.extend(_EXPANSION_COMMANDS)
     return "\n".join(lines)

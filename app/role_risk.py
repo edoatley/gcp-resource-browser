@@ -44,6 +44,12 @@ MEMBER_TYPES = (
     "allAuthenticatedUsers",
     "principal",
     "principalSet",
+    # Convenience values meaning "whoever holds Owner/Editor/Viewer on project
+    # X", found on legacy storage roles. CAI accepts them in memberTypes:
+    # (verified live: each matched exactly its legacy bindings).
+    "projectOwner",
+    "projectEditor",
+    "projectViewer",
 )
 
 # Google-managed service agents (see the gcp-sa-types source). Their grants

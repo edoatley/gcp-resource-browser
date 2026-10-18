@@ -45,6 +45,7 @@ core so the two surfaces cannot drift apart.
 | `app/config.py` | Site config discovery, validation and merging ([Configuration](CONFIGURATION.md)). |
 | `app/aggregate.py` | IAM fetch and join, and the `summary` rollup. |
 | `app/fanout.py` | Bounded concurrent search across several scopes. |
+| `app/expansion.py` | `--expand-members`: who is behind a group or `projectOwner:`-style member, read once per distinct member with concurrency capped at 8; other kinds are explained in place. |
 | `app/cache.py` | Opt-in TTL response cache, inactive unless a request sets a TTL. |
 | `app/output.py` | JSON and CSV emitters for the CLI. |
 | `app/role_risk.py` + `role_risk_rules.json` | Which permissions make a role risky, with cited sources. Pure; `core` does the I/O. |
@@ -153,6 +154,18 @@ Two more constraints shape the billing path:
 - **The Cloud Billing API returns role names, with no `matched_permissions`.** Risk is
   therefore resolved locally against the catalogue, and a role missing from it lands in
   `unclassified_roles`. Dropping it would be the silent under-report this tool exists to avoid.
+
+**The rules are checked, not just cited.** A rule matches an exact permission string, so a typo
+or retired permission would match nothing and say nothing. `tests/test_role_risk_guardrails.py`
+checks every permission against a committed catalogue snapshot, and checks that every source is
+cited. `scripts/check-rule-permissions.sh` checks the live catalogue and the permissions
+testable on a project. A site config cannot lower a built-in rule unless it says
+`"downgrade": true`, and a confirmed downgrade is named in every coverage note.
+
+**Members that stand for others** (`group:`, `projectOwner:p`) can be expanded on request
+(`app/expansion.py`). Expansion is one level deep and attached-only, and adds `member_count`
+and `expansions` without changing a single row. `projectOwner:`-style members are read from
+the project's own policy through CAI; groups are read through Cloud Identity.
 
 **Custom roles cannot be defined on a folder** — IAM supports the organization and project
 levels only — so `list_risky_roles` rejects a folder scope instead of answering with

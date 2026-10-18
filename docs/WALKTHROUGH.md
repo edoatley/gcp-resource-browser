@@ -1,6 +1,6 @@
 # Manual walkthrough
 
-Exercises every Phase 2 capability against real GCP. **Every step returns data** — an empty
+Exercises the tool's capabilities against real GCP, from Phase 2's filters to Phase 10's rule checks. **Every step returns data** — an empty
 result proves nothing, since it cannot distinguish "works correctly" from "silently broken".
 Where a negative result is the point, it is paired with a positive control on the same filter.
 
@@ -311,3 +311,90 @@ curl 'http://127.0.0.1:8000/v1/resources?scope=projects/ace-gcp-training&show_al
     | jq '{count, suppressed}'
 open http://127.0.0.1:8000/api/docs
 ```
+
+## 15. Risky roles and grants (Phases 8 and 10)
+
+Figures are from 2026-10-18 on this estate, with 29 rules. They move as Google changes its
+role catalogue and as the estate changes, so the differential checks are the real pass/fail.
+
+```bash
+# The rules themselves: every permission exists and some predefined role grants it
+./scripts/check-rule-permissions.sh --project sudoku-eo-2026    # OK: all 29 ...
+
+# Roles. Service agents are hidden and counted, never dropped
+uv run gcpe roles --risk high                       # 43 shown, 61 service-agent roles hidden
+./scripts/compare-roles.sh --risk high              # MATCH: 104 roles (gcloud cannot hide agents)
+./scripts/compare-roles.sh --risk medium            # MATCH: 142 roles
+
+# A folder has no custom roles, so it is REJECTED, not answered with predefined roles only
+uv run gcpe roles --scope folders/1; echo "exit $?"  # exit 2
+
+# Grants, and what a project scope cannot see (read the closing note)
+uv run gcpe grants projects/sudoku-eo-2026          # 4 shown, 4 service-agent grants hidden
+./scripts/compare-grants.sh --scope projects/gcp-sandbox-2026-18798 --role-risk medium   # MATCH: 30
+./scripts/compare-grants.sh --scope projects/sudoku-eo-2026 --role-risk medium \
+    --member-type user --member-type serviceAccount    # two member types: two CAI queries
+
+# Billing accounts: their own API, no scope
+uv run gcpe billing-grants                          # 2 accounts read, 2 high-risk grants
+./scripts/compare-billing-grants.sh
+```
+
+The sandbox project still has the **legacy Cloud Build service account**
+(`116498173042@cloudbuild.gserviceaccount.com`). It shows up as a high-risk holder of
+`cloudbuild.builds.create`, the case that rule exists for.
+
+### Who is behind a member
+
+```bash
+uv run gcpe grants projects/sudoku-eo-2026 --role-risk medium --expand-members --by member
+#   sudoku-eo-2026 (1)  project owner     -> you
+#   sudoku-eo-2026 (0)  project editor    -> nobody
+#   github-pool: repository = edoatley/sudoku-app  federated set   (explained, full URI below)
+./scripts/compare-member-expansion.sh --scope projects/sudoku-eo-2026   # MATCH (repeat per project)
+```
+
+`group:` expansion cannot be walked through here. There are no group grants on this estate,
+and no Cloud Identity directory; see `docs/todo/group-expansion-cloud-identity.md`.
+
+### Custom roles
+
+There are no custom roles on this estate. Phase 8 was verified with a temporary one, and you
+can repeat that with these commands, which **change the project**:
+
+```bash
+# A deleted role's ID cannot be reused for a while (gcpe_verify_tmp was used in Phase 8),
+# so use a fresh ID each time.
+gcloud iam roles create gcpe_walkthrough --project=gcp-sandbox-2026-18798 \
+    --title="gcpe walkthrough (temporary)" --permissions=iam.serviceAccounts.actAs
+uv run gcpe roles --scope projects/gcp-sandbox-2026-18798    # one more role, marked (custom)
+./scripts/compare-roles.sh --scope projects/gcp-sandbox-2026-18798
+gcloud iam roles delete gcpe_walkthrough --project=gcp-sandbox-2026-18798
+```
+
+### A site cannot weaken the rules by accident
+
+```bash
+cat > gcp-explorer.json <<'JSON'
+{"role_risk_rules": [{"permission": "iam.serviceAccounts.actAs", "risk": "medium", "reason": "test"}]}
+JSON
+uv run gcpe roles          # refused with a ConfigError: "lowers it from high to medium ...
+                           # add \"downgrade\": true" (currently printed as a Python traceback)
+# Add "downgrade": true and rerun: it works, and the closing note names the downgrade.
+rm gcp-explorer.json
+```
+
+## 16. The capability browser (Phase 9)
+
+```bash
+uv run gcpe docs           # opens http://127.0.0.1:8000/docs
+./scripts/compare-projects.sh    # the scope picker's list vs gcloud: MATCH, 7 projects
+```
+
+The header should name you and `gcp-resource-browser-eo`, and the picker should list all 7
+projects. On **Search resources**, pick an example, change the type to `serviceaccount`, and
+press **Call API**. On `gcp-sandbox-2026-18798` it returns 5 rows, the same as
+`uv run gcpe search projects/gcp-sandbox-2026-18798 --type serviceaccount`. A bad sort field
+must disable Call API and say why. On `gcpe serve`, `/docs` must redirect to `/api/docs`
+instead.
+

@@ -56,6 +56,11 @@ implementations and a differential checker for that:
 ./scripts/check-noise.sh projects/my-project   # suppressed result ⊂ full result
 
 ./scripts/compare-grants.sh --scope organizations/123 --role-risk medium   # risky grants vs gcloud
+./scripts/compare-roles.sh --risk medium                                   # risky roles vs jq
+./scripts/compare-billing-grants.sh                                        # billing IAM vs gcloud
+./scripts/compare-member-expansion.sh --scope projects/my-project          # --expand-members
+./scripts/compare-projects.sh                                              # gcpe docs scope picker
+./scripts/check-rule-permissions.sh                                        # every rule names a real permission
 ```
 
 `compare-resources.sh` diffs the tool's output against `gcloud asset search-all-resources` and

@@ -702,16 +702,13 @@ The catalogue plus its staleness test is the valuable half and is useful on its 
 drift between the surfaces and the documentation a build failure rather than something a
 reader notices months later. The page is a renderer over it. Build them in that order.
 
-## Phase 10 — Harden the role risk rules ◐
+## Phase 10 — Harden the role risk rules ☑
 
 **Goal:** make `app/role_risk_rules.json` checkable, not just cited. An external review
 (2026-10) found escalation paths the rules miss where `iam.serviceAccounts.actAs` is not
 needed, such as `cloudbuild.builds.create` and `compute.instances.setMetadata`. It also found
 that nothing stops a misspelled or retired permission from silently matching nothing. Some of
 the review's claims were wrong on inspection; the handoff records which.
-
-Written up as a pickup-ready item in
-[`docs/todo/role-risk-rules-hardening.md`](todo/role-risk-rules-hardening.md).
 
 - ☑ Every rule permission must exist in the IAM catalogue. A unit test checks
   `tests/fixtures/iam_permissions.txt.gz` (14,063 permissions, refreshed by
@@ -733,7 +730,30 @@ Written up as a pickup-ready item in
 - ☑ A site rule may not downgrade a default silently. A downgrade is rejected unless it sets
   `"downgrade": true`, and is then named in every roles, grants and billing-grants coverage
   note. `"downgrade": true` on a rule that lowers nothing is also rejected.
-- ☐ Candidate rules, each verified live and given a primary source before being added.
+- ☑ Candidate rules, each verified live and given a primary source before being added. All 9
+  new quotes were checked against the raw pages. The ruleset went from 22 to 29 rules.
+  - **Added, high:** `cloudbuild.builds.create`. It escalates without `actAs` only where the
+    legacy Cloud Build service account is still enabled; the sandbox project has one. Also
+    `deploymentmanager.deployments.update`; Deployment Manager is unsupported but runs until
+    June 30, 2027. The existing `.create` rule gained the same two sources.
+  - **Added, medium:**
+    - `iam.serviceAccounts.getOpenIdToken`: an ID token for one audience that cannot call
+      Google APIs, so medium rather than the review's high;
+    - `bigquery.datasets.update` and `.setIamPolicy`: Google says both set a dataset's access
+      policy;
+    - `artifactregistry.repositories.setIamPolicy`;
+    - `compute.instances.setIamPolicy`.
+  - **Rejected, with sources:** `compute.instances.setMetadata` and
+    `compute.projects.setCommonInstanceMetadata`. Changing a VM's metadata when it runs as a
+    service account needs `actAs`, contrary to the review. `composer.environments.*` was
+    rejected because no escalation was sourced.
+  - **Live on 2026-10-18:**
+    - `check-rule-permissions.sh`: OK on all 29;
+    - `compare-roles.sh`: MATCH at high (104) and medium (142);
+    - `compare-grants.sh`: MATCH on two projects at both levels and with two member types.
+      `gcp-sandbox-2026-18798` medium went from 25 to 30 grants.
+  - **Batching:** a search still sends one query, or two with two member types. 29 rules is 3
+    short of the 32-alternative limit for a search with no member types.
 
 ## Sequencing rationale
 

@@ -86,15 +86,22 @@ live from Google's catalogue.
 | `iam.serviceAccounts.setIamPolicy` | high | Can grant themselves the right to impersonate a service account | [rhino-part2](#rhino-part2) |
 | `iam.roles.update` | high | Can add permissions to a custom role they already hold | [rhino-part1](#rhino-part1) |
 | `orgpolicy.policy.set` | high | Can disable organization policy guardrails | [rhino-part2](#rhino-part2) |
-| `deploymentmanager.deployments.create` | high | Deploys as the Google APIs service account, which has Editor by default | [rhino-part1](#rhino-part1) |
+| `deploymentmanager.deployments.create` | high | Deploys as the Google APIs service agent, which has Editor by default. Deployment Manager is unsupported but runs for existing customers until June 30, 2027 | [rhino-part1](#rhino-part1), [gcp-dm-access](#gcp-dm-access), [gcp-dm-deprecation](#gcp-dm-deprecation) |
+| `deploymentmanager.deployments.update` | high | Redeploys as the Google APIs service agent, which has Editor by default, without actAs. Runs until June 30, 2027 | [gcp-dm-access](#gcp-dm-access), [gcp-dm-deprecation](#gcp-dm-deprecation) |
+| `cloudbuild.builds.create` | high | Runs builds as the legacy Cloud Build service account without actAs, where that account is still enabled (the default before May-June 2024). Newer projects build as an account that needs actAs, already high | [gcp-cloudbuild-sa](#gcp-cloudbuild-sa), [gcp-cloudbuild-sa-change](#gcp-cloudbuild-sa-change) |
 | `storage.hmacKeys.create` | medium | Can mint Cloud Storage HMAC keys for a service account | [rhino-part2](#rhino-part2) |
-| `apikeys.keys.create` | medium | Can create API keys, which are unrestricted by default. The API Keys API checks this permission; the older `serviceusage.apiKeys.create` that Rhino names still exists but no predefined role grants it | [gcp-api-keys-iam](#gcp-api-keys-iam), [gcp-api-keys](#gcp-api-keys), [rhino-part2](#rhino-part2) |
+| `apikeys.keys.create` | medium | Can create API keys, which are unrestricted by default. The API Keys API checks this permission; the older serviceusage.apiKeys.create that Rhino names still exists but no predefined role grants it | [gcp-api-keys-iam](#gcp-api-keys-iam), [gcp-api-keys](#gcp-api-keys), [rhino-part2](#rhino-part2) |
 | `storage.buckets.setIamPolicy` | medium | Can grant access to a bucket, including publicly | [rhino-part2](#rhino-part2) |
 | `secretmanager.secrets.setIamPolicy` | medium | Can grant access to a secret | [rhino-part2](#rhino-part2) |
 | `cloudfunctions.functions.setIamPolicy` | medium | Can grant invoke access to a function, including publicly | [rhino-part2](#rhino-part2) |
 | `run.services.setIamPolicy` | medium | Can grant invoke access to a Cloud Run service, including publicly | [rhino-part2](#rhino-part2) |
 | `pubsub.topics.setIamPolicy` | medium | Can grant publish or subscribe access to a topic | [rhino-part2](#rhino-part2) |
 | `cloudkms.cryptoKeys.setIamPolicy` | medium | Can grant use of an encryption key | [rhino-part2](#rhino-part2) |
+| `iam.serviceAccounts.getOpenIdToken` | medium | Can mint an OIDC ID token as a service account: proof of its identity to one audience, such as Cloud Run, IAP or an external trust. It cannot call Google APIs | [gcp-sa-permissions](#gcp-sa-permissions) |
+| `bigquery.datasets.update` | medium | Can set a dataset's access policy, as well as its other settings | [gcp-bigquery-iam](#gcp-bigquery-iam) |
+| `bigquery.datasets.setIamPolicy` | medium | Can set a dataset's access policy | [gcp-bigquery-iam](#gcp-bigquery-iam) |
+| `artifactregistry.repositories.setIamPolicy` | medium | Can grant access to a repository, including publicly, or let others push images | [gcp-artifact-registry-access](#gcp-artifact-registry-access) |
+| `compute.instances.setIamPolicy` | medium | Can grant access to a VM | [gcp-compute-resource-iam](#gcp-compute-resource-iam) |
 
 ### Deliberately not listed
 
@@ -104,6 +111,21 @@ live from Google's catalogue.
 escalates only by running a workload as a more privileged service account, which requires
 `iam.serviceAccounts.actAs`. That permission is already high. Listing these too would flag
 every deployer role without finding anything new.
+
+The same goes for `compute.instances.setMetadata` and
+`compute.projects.setCommonInstanceMetadata`, which can add SSH keys or a startup script to a
+VM. Google requires `iam.serviceAccounts.actAs` to change metadata on a VM that runs as a
+service account ([gcp-compute-metadata](#gcp-compute-metadata)).
+
+`composer.environments.create` and `composer.environments.update` are not listed either. No
+source showed an escalation through them that doesn't already need `actAs`, or write access
+to the environment's DAG bucket.
+
+`cloudbuild.builds.create` *is* listed, because it is the exception. Projects that still use
+the legacy Cloud Build service account let a Cloud Build Editor run builds as it with no
+`actAs` ([gcp-cloudbuild-sa](#gcp-cloudbuild-sa)). That was the default until May–June 2024
+([gcp-cloudbuild-sa-change](#gcp-cloudbuild-sa-change)). On newer projects the rule flags
+something `actAs` already covers; its reason says so.
 
 ## Sources
 
@@ -161,6 +183,60 @@ every deployer role without finding anything new.
 
 > Unrestricted API keys are insecure. To reduce security risks, you can restrict API keys
 
+### gcp-cloudbuild-sa
+
+**[Cloud Build: Default Cloud Build service account](https://docs.cloud.google.com/build/docs/cloud-build-service-account)**
+
+> Legacy Cloud Build service account (if enabled): Any user with the Cloud Build Editor role can create and directly run a trigger. ... User-specified service account or the Compute Engine default service account: Any user with the Cloud Build Editor role who has the iam.serviceAccounts.actAs permission can create and directly run a trigger.
+
+### gcp-cloudbuild-sa-change
+
+**[Cloud Build: Cloud Build default service account change](https://docs.cloud.google.com/build/docs/cloud-build-service-account-updates)**
+
+> The default behavior for how Cloud Build uses service accounts in new projects was changed over several weeks in May and June 2024. ... Before this change, Cloud Build used a Cloud Build-specific service account as the default, now referred to as the Cloud Build legacy service account. After this change, Cloud Build now uses the Compute Engine default service account as the default service account.
+
+### gcp-sa-permissions
+
+**[Google Cloud IAM: Roles for service account authentication](https://docs.cloud.google.com/iam/docs/service-account-permissions)**
+
+> The Service Account Token Creator role lets you create the following types of short-lived credentials: OAuth 2.0 access tokens, which you can use to authenticate with Google APIs ... iam.serviceAccounts.getOpenIdToken: lets you create OpenID Connect (OIDC) ID tokens
+
+### gcp-dm-access
+
+**[Cloud Deployment Manager: Access control with IAM](https://docs.cloud.google.com/deployment-manager/docs/access-control)**
+
+> To create other Google Cloud resources, Deployment Manager uses the credentials of the Google APIs Service Agent to authenticate to other APIs. ... The Google APIs Service Agent is automatically granted the Editor role at the project level
+
+### gcp-dm-deprecation
+
+**[Cloud Deployment Manager: Deployment Manager deprecation](https://docs.cloud.google.com/deployment-manager/docs/deprecations)**
+
+> As of April 1, 2026, Deployment Manager is not supported on Google Cloud. Deployment Manager will remain running for all existing customers through Google Cloud console, Google Cloud CLI, and Google Cloud Deployment Manager V2 API until June 30, 2027.
+
+### gcp-bigquery-iam
+
+**[BigQuery: Control access to resources with IAM](https://docs.cloud.google.com/bigquery/docs/control-access-to-resources-iam)**
+
+> To set a dataset's access policy: bigquery.datasets.update ... To set a dataset's access policy (console only): bigquery.datasets.setIamPolicy
+
+### gcp-artifact-registry-access
+
+**[Artifact Registry: Access control with IAM](https://docs.cloud.google.com/artifact-registry/docs/access-control)**
+
+> To configure a repository for public read-only access, grant the Artifact Registry Reader role to the principal allUsers.
+
+### gcp-compute-resource-iam
+
+**[Compute Engine: Managing access to Compute Engine resources](https://docs.cloud.google.com/compute/docs/access/granting-access-to-resources)**
+
+> To grant or revoke access to resources: ... compute.RESOURCE_TYPE.setIamPolicy on the resource ... Replace RESOURCE_TYPE with the resource that you want to manage access to. For example instances, instanceTemplates, or images.
+
+### gcp-compute-metadata
+
+**[Compute Engine: Set and remove custom metadata](https://docs.cloud.google.com/compute/docs/metadata/setting-custom-metadata)**
+
+> The following permissions are required to set or remove custom metadata on VMs: If your VMs use service accounts: iam.serviceAccounts.actAs on the service accounts or project
+
 ### rhino-part1
 
 **[Rhino Security Labs (Spencer Gietzen): Privilege Escalation in Google Cloud Platform -- Part 1 (IAM)](https://rhinosecuritylabs.com/gcp/privilege-escalation-google-cloud-platform-part-1/)**
@@ -177,7 +253,7 @@ every deployer role without finding anything new.
 
 Google creates and manages service agents for its own services
 ([gcp-sa-types](#gcp-sa-types)). Their grants are Google's, not yours to review, but they hold
-many risky permissions: 60 of the high-risk predefined roles are service-agent roles. They are
+many risky permissions: 61 of the 104 high-risk predefined roles are service-agent roles (October 2026). They are
 **hidden by default and always counted**. `--show-all` / `?show_all=true` includes them.
 
 A grant is treated as a service agent's when the role name ends in `serviceAgent`, or the

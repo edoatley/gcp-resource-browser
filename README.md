@@ -13,7 +13,9 @@ whole project, folder or organisation, with filters evaluated server-side.
 > custom roles and billing-account IAM, all verified against a real estate. Phase 9 adds
 > `gcpe docs`, a local page per capability with runnable examples for your own scope, built
 > over a tested catalogue (`app/capabilities.py`), and verified against a real estate.
-> `--expand-members` shows who is behind groups and project-role members; the `group:` path
+> Phase 10 hardens the 29 risk rules: a test and a live script check that every rule's
+> permission exists, and each new source quote was checked against its page. `--expand-members` shows who is behind
+> groups and project-role members; the `group:` path
 > awaits an estate with Cloud Identity groups ([`docs/todo/`](docs/todo/)). See the
 > [delivery plan](docs/DELIVERY_PLAN.md).
 

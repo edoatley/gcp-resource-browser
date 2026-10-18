@@ -54,8 +54,8 @@ MEMBER_TYPES = (
 
 # Google-managed service agents (see the gcp-sa-types source). Their grants
 # are made by Google for a service to work and are not the customer's to
-# review, but they hold many risky permissions: 58 of the 88 predefined roles
-# matched by the default rules are service-agent roles. Default service
+# review, but they hold many risky permissions: 61 of the 104 predefined roles
+# matched at high risk are service-agent roles (October 2026). Default service
 # accounts (PROJECT_NUMBER-compute@developer..., PROJECT@appspot...) are NOT
 # agents -- they are customer-managed and a classic over-grant, so they stay.
 _AGENT_MEMBER = re.compile(

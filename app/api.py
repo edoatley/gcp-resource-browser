@@ -270,6 +270,7 @@ def list_grants(
     ),
     group_by: str | None = Query(default=None, description=Help.GROUP_BY, examples=["member"]),
     show_all: bool = Query(default=False, description=Help.SHOW_ALL_AGENTS),
+    expand_members: bool = Query(default=False, description=Help.EXPAND_MEMBERS),
     limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=10_000, description=Help.LIMIT),
 ) -> GrantList:
     """Every principal holding a role at or above `role_risk`, matched by permission.
@@ -285,6 +286,7 @@ def list_grants(
             show_all=show_all,
             limit=limit,
             group_by=group_by,
+            expand_members=expand_members,
         )
     )
 
@@ -308,6 +310,7 @@ def list_billing_grants(
     ),
     group_by: str | None = Query(default=None, description=Help.GROUP_BY, examples=["member"]),
     show_all: bool = Query(default=False, description=Help.SHOW_ALL_AGENTS),
+    expand_members: bool = Query(default=False, description=Help.EXPAND_MEMBERS),
     limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=10_000, description=Help.LIMIT),
 ) -> BillingGrantList:
     """Principals holding risky roles on a billing account.
@@ -324,6 +327,7 @@ def list_billing_grants(
             show_all=show_all,
             limit=limit,
             group_by=group_by,
+            expand_members=expand_members,
         )
     )
 

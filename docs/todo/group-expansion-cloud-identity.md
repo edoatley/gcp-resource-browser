@@ -1,91 +1,75 @@
-# Group expansion via the Cloud Identity Groups API
+# Verify `group:` expansion against real Cloud Identity groups
 
-**Summary:** Expand `group:` members in risky-grant results into the people they actually
-contain, so an over-permissioning review can see headcount rather than a group name.
+**Summary:** `--expand-members` reads `group:` members through the Cloud Identity Groups API.
+It is built and unit-tested but has never run against a real group. Verify it on an estate
+that has Cloud Identity groups granted risky roles, fix what that turns up, and tick the last
+Phase 8 item.
 
-**Origin:** Phase 8 (high-risk roles and grants), merged in #2 (`54b1a89`) and #3 (`e53c8ec`).
-The other two Phase 8 items — billing-account IAM and custom-role listing — landed and were
-verified live there; this is the third and last. Branch fresh from `main`.
+**Branch context:** `member-expansion`, which shipped "who is behind a member". The
+`projectOwner`/`Editor`/`Viewer` path was verified live there, and `principalSet` and similar
+members are explained in place. Only the group path is unproven. Branch fresh from `main`.
 
 ## Why deferred
 
-The PR was already large, and this item is the only one of the three that cannot be verified
-on the current dev estate: it has no organization and therefore no GCP-visible groups. It
-would have shipped unproven. It also needs a new API, a new auth surface and a bounding
-strategy, so it is a feature in its own right rather than a finishing touch.
+The dev estate cannot exercise it. All 7 projects were checked, and none has a `group:`
+grant. With no organization there is no Cloud Identity directory, and groups owned by a
+personal Google account cannot be read through the API. Shipping the code was still
+worthwhile, because its failure modes are loud: errors are named in `expansions` and in the
+coverage note. Calling it verified would not have been honest.
 
 ## Context
 
 **Relevant files:**
-- `app/core.py` — `search_grants` (CAI path) and `search_billing_grants`. Both build `Grant`
-  rows; both would gain expansion. `get_rest_session()` / `_paginate` / `_rest_error` are the
-  REST plumbing to reuse — Cloud Identity is plain REST like IAM and Cloud Billing.
-- `app/fanout.py` — the bounded-concurrency pattern to copy. `DEFAULT_MAX_CONCURRENCY = 8`,
-  kept below anyio's 40-thread default.
-- `app/models.py` — `Grant`, `GrantGroup`, `GrantList`, `BillingGrantList`.
-- `app/role_risk.py` — `member_type()` identifies `group:` members.
-- `docs/DELIVERY_PLAN.md` — Phase 8 section, where this is the one remaining ☐.
+- `app/core.py`: `group_members()`. It makes two calls: `groups:lookup?groupKey.id=<email>`,
+  then `<group>/memberships:searchTransitiveMemberships`, paginated. The remedy text is
+  `_GROUPS_REMEDY`.
+- `app/expansion.py`: the bounded fan-out, which calls `group_members` once per distinct
+  group.
+- `tests/test_expansion.py`: the fakes. Their response shape is assumed from the API
+  reference and has not been captured live. **Check this first.**
+- `scripts/compare-member-expansion.sh` and `gcloud-expand-members.sh`: the gcloud side uses
+  `gcloud identity groups memberships search-transitive-memberships --group-email=…
+  --format='value(preferredMemberKey.id)'`.
 
-**Current state:**
-Every IAM-bearing response carries a note ending *"Group membership is not expanded: a group
-grant applies to every member."* A `Grant` row for `group:platform-admins@example.com` holding
-Organization Admin tells you the group holds it, not whether that is 3 people or 300 — and the
-headcount is usually the actual finding. `--by member` rolls up by the literal member string,
-so groups and users sit side by side with no indication of their weight.
+**Assumptions to confirm live:**
+1. `groups:lookup` takes `groupKey.id` and returns `{"name": "groups/<id>"}`.
+2. Each transitive membership carries `preferredMemberKey: [{"id": "<email>"}]`.
+3. A **nested group** appears in the transitive results as its members, not as itself. If the
+   group itself appears too, decide whether to drop it or label it.
+4. The API needs the `cloud-platform` scope on the ADC session, or `cloud-identity.groups.readonly`.
+   `get_rest_session()` requests only `cloud-platform`. If that fails, the remedy has to say so.
+5. A missing directory role gives a 403 that `_rest_error` reports as `ScopeAccessDenied`
+   with the remedy, not as `SERVICE_DISABLED`.
 
-**Key constraints:**
-- **New auth surface.** Needs `cloudidentity.googleapis.com` enabled and
-  `roles/cloudidentity.groups.readonly` — a Cloud Identity / Workspace directory role, not a
-  GCP project role. Different admin, often a different team. Everything else in this tool
-  needs only GCP IAM.
-- **Must be bounded.** Two calls per *distinct group* in the results (`groups.lookup`, then
-  `groups.memberships.searchTransitiveMemberships`). An org-wide medium-risk search can surface
-  hundreds of groups. Follow `fanout.py`: bounded concurrency, loud partial failure.
-- **Opt-in, not default.** This turns an infrastructure audit into a list of named humans.
-  `--expand-groups` / `?expand_groups=true`, off by default.
-- **Do not collapse a binding into N rows.** One `Grant` is one binding; the CSV columns and
-  the `group_by` rollups depend on that. Add member detail alongside, do not replace.
-- Use `searchTransitiveMemberships`, which flattens nested groups server-side — it avoids
-  writing a cycle-safe walk.
+**Key constraints:** Expansion is opt-in, one level deep, and attached-only. It never changes
+rows, and with the flag off the output must be byte-identical. All of this is in `CLAUDE.md`
+and tested.
 
 ## What to do
 
-1. Add `expand_groups: bool = False` to `GrantFilters` and `BillingGrantFilters` in
-   `app/params.py`, plus `Help.EXPAND_GROUPS`.
-2. New module `app/groups.py`: `expand(emails, max_concurrency=8) -> dict[str, GroupMembers]`,
-   using `core.get_rest_session()` and `core._paginate`. Lookup then transitive search per
-   group, concurrent and bounded. Return partial results with a failure list — never raise away
-   a whole search because one group was unreadable.
-3. Add `expanded_members: list[str] | None` and `member_count: int | None` to `Grant`.
-   `None` means not requested; `[]` means requested and empty. Do not collapse the two —
-   same rule as `iam_bindings`.
-4. Call it from `search_grants` and `search_billing_grants` after rows are built, on the
-   distinct `group:` members only.
-5. Amend the coverage note: when expansion ran, say so and name any groups that failed; when
-   it did not, keep today's wording.
-6. Surfaces: `--expand-groups` on `grants` and `billing-grants`, `?expand_groups=` on both
-   endpoints, a member-count column in the tables, and a decision on whether the CSV carries
-   named members (it should be opt-in within opt-in, or omitted).
-7. `scripts/gcloud-expand-groups.sh` + `scripts/compare-group-expansion.sh` using
-   `gcloud identity groups memberships search-transitive-memberships`. Expect to ship these
-   unproven until an estate with real nested groups runs them.
-8. Update `docs/DELIVERY_PLAN.md` (Phase 8), `docs/CONCEPTS.md`, `docs/API.md`, `docs/CLI.md`,
-   `docs/GCP_SETUP.md` (new API + role), `scripts/README.md` and `CLAUDE.md`. Regenerate
-   `openapi.yml` and `docs/CLI_REFERENCE.md`.
+1. You need an estate with Cloud Identity (Free is enough) or Workspace, a group with a nested
+   group inside, and both granted a risky role on a project. Give the caller Groups Reader in
+   the directory, and enable `cloudidentity.googleapis.com` on the quota project
+   (`scripts/setup-gcp.sh` now does this).
+2. Run `gcpe grants projects/P --expand-members -o json | jq .expansions` and compare it with
+   the Admin console.
+3. Run `scripts/compare-member-expansion.sh --scope projects/P`.
+4. Capture one real `searchTransitiveMemberships` response, then make the fake in
+   `tests/test_expansion.py` match it.
+5. Check the failure paths: remove the directory role (expect a named error and the remedy),
+   then disable the API (expect it to name the quota project).
+6. Tick the item in `docs/DELIVERY_PLAN.md` (Phase 8), recording what was run, and delete
+   this file.
 
 ## Acceptance criteria
 
-- [ ] `gcpe grants ORG --expand-groups --by member` shows a member count per group
-- [ ] Without the flag, behaviour and output are byte-identical to today
-- [ ] A group that cannot be read is named in the response, and the search still returns
-- [ ] Expansion issues at most 2 calls per distinct group, concurrency capped at 8
-- [ ] `expanded_members is None` (not requested) is distinguishable from `[]` (none found)
-- [ ] The coverage note stops claiming membership is unexpanded when it was expanded
-- [ ] `uv run pytest`, `ruff check`, and the `openapi.yml` / `CLI_REFERENCE.md` staleness
-      checks all pass
+- [ ] `compare-member-expansion.sh` reports MATCH on a scope with at least one nested group
+- [ ] The fakes match a captured live response
+- [ ] The directory-role-missing and API-disabled cases each produce the right, named error
+- [ ] The Phase 8 item is ☑ with the verification recorded
 
 ## Related specs / docs
 
-- [`docs/DELIVERY_PLAN.md`](../DELIVERY_PLAN.md) — Phase 8, the remaining ☐ and its rationale
-- [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md) — "Adding a Google REST API" checklist
-- [`CLAUDE.md`](../../CLAUDE.md) — IAM invariants; noise/suppression rules that bounding follows
+- [`docs/CONCEPTS.md`](../CONCEPTS.md#who-is-behind-a-member): user-facing semantics
+- [`docs/GCP_SETUP.md`](../GCP_SETUP.md): the API and directory role
+- [`docs/DELIVERY_PLAN.md`](../DELIVERY_PLAN.md): Phase 8

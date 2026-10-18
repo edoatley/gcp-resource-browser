@@ -153,7 +153,7 @@ adding a resource type is a one-line change that lights up both surfaces.
 ## Not yet built
 
 Phases 0–3, 5, 6, most of 8 and most of 9 are built. Still open: Phase 4's baseline measured on a real
-organisation, effective (inherited) IAM, Phase 8's group expansion, and the deliberately
+organisation, effective (inherited) IAM, live verification of Phase 8's `group:` expansion, and the deliberately
 conditional Phase 7, and a manual click-through of Phase 9's browser. Deferred items that are not whole phases live
 in `docs/todo/`, one self-contained handoff each — check there before designing something that
 may already be specified.
@@ -161,8 +161,8 @@ may already be specified.
 **The dev estate has no organization**, 7 projects and 2 billing accounts (see
 `docs/WALKTHROUGH.md` for the per-project breakdown). That is a standing constraint on what
 can be proven here, not a gap in the code: anything org-scoped is unverifiable on this estate.
-It blocks Phase 4's baseline ("measured on a real organisation"), group expansion (no
-organization means no GCP-visible groups), and org-level custom roles. Project-scoped
+It blocks Phase 4's baseline ("measured on a real organisation"), verifying `group:` expansion
+(no organization means no Cloud Identity groups; `projectOwner:`-style expansion is verified), and org-level custom roles. Project-scoped
 equivalents work and are verified. Don't plan a verification step that needs an org without
 checking whether one exists yet. **Check
 `docs/DELIVERY_PLAN.md` before assuming a missing feature is out of scope** — it phases this work and records the sequencing rationale. Keep its checkboxes
@@ -232,6 +232,13 @@ matches on permissions.
 clients. Add another Google REST API through that session and `_paginate`, and translate
 failures with `_rest_error` so `SERVICE_DISABLED` stays distinguished from a real 403 — pass a
 `remedy` naming the role and API needed.
+
+**Member expansion (`app/expansion.py`) is opt-in and one level deep.** `expand_members` adds
+`member_count` and `expansions`. It never adds or removes rows: one `Grant` stays one binding.
+Without the flag the JSON must be byte-identical, and a test enforces this. `projectOwner:p` and
+its siblings come from the project's attached policy through CAI; `group:` comes from Cloud
+Identity. An unreadable member gets an `error` and is named in the coverage note, never
+dropped.
 
 **IAM is attached-only, and must keep saying so.** `iam_note` on every IAM-bearing response
 states that inherited grants are excluded; presenting attached bindings as effective access is

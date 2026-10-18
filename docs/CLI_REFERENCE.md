@@ -156,6 +156,7 @@ $ gcpe grants [OPTIONS] {scope}
 * `-m, --member-type <str>`: Principal type to include, repeatable: user, group, serviceAccount, domain, allUsers, allAuthenticatedUsers, principal, principalSet. Omit for all.
 * `--by <str>`: Roll grants up by `member` (who holds what) or `role` (who holds each role)
 * `--show-all`: Include Google-managed service agents, hidden by default
+* `--expand-members`: Show who is behind members that stand for other principals: a group (via Cloud Identity), or projectOwner/Editor/Viewer (from that project&#x27;s attached policy). Off by default, because it lists named people.
 * `-n, --limit <int range>`: Maximum resources to return  [default: 1000; x&gt;=1]
 * `-o, --output <table|json|csv>`: Output format  [default: table]
 * `--show-gcloud`: Print the equivalent `gcloud asset search-all-iam-policies` command(s)
@@ -181,6 +182,7 @@ $ gcpe billing-grants [OPTIONS]
 * `-m, --member-type <str>`: Principal type to include, repeatable: user, group, serviceAccount, domain, allUsers, allAuthenticatedUsers, principal, principalSet. Omit for all.
 * `--by <str>`: Roll grants up by `member` (who holds what) or `role` (who holds each role)
 * `--show-all`: Include Google-managed service agents, hidden by default
+* `--expand-members`: Show who is behind members that stand for other principals: a group (via Cloud Identity), or projectOwner/Editor/Viewer (from that project&#x27;s attached policy). Off by default, because it lists named people.
 * `-n, --limit <int range>`: Maximum resources to return  [default: 1000; x&gt;=1]
 * `-o, --output <table|json|csv>`: Output format  [default: table]
 * `--show-gcloud`: Print the equivalent `gcloud billing` command(s)

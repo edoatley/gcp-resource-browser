@@ -862,6 +862,14 @@ def list_risky_roles(
     )
 
 
+# Stated on every grant response unless expansion was asked for, when
+# `_expansion_note` replaces it with what was actually expanded.
+MEMBERS_NOT_EXPANDED = (
+    "Group membership is not expanded: a group grant applies to every member. Pass "
+    "expand_members to see who is behind groups and projectOwner/Editor/Viewer members."
+)
+
+
 def _coverage_note(scope: str) -> str:
     """What a grant search at this scope cannot see. Stated on every response."""
     kind = scope.split("/", 1)[0]
@@ -878,8 +886,8 @@ def _coverage_note(scope: str) -> str:
     }[kind]
     return (
         f"{above} Billing account IAM is not indexed by Cloud Asset Inventory and is not "
-        "included here; run `gcpe billing-grants` (GET /v1/billing-grants) for it. Group "
-        "membership is not expanded: a group grant applies to every member."
+        "included here; run `gcpe billing-grants` (GET /v1/billing-grants) for it. "
+        + MEMBERS_NOT_EXPANDED
     )
 
 
@@ -979,6 +987,8 @@ def search_grants(
     if truncated:
         grants = grants[: filters.limit]
 
+    expansions = _expand(grants, filters.expand_members, client=client)
+
     return GrantList(
         scope=filters.scope,
         min_risk=minimum.value,
@@ -993,9 +1003,10 @@ def search_grants(
             if hidden
             else ""
         ),
-        coverage_note=_coverage_note(filters.scope),
+        coverage_note=_expansion_note(_coverage_note(filters.scope), expansions),
         grants=grants,
         groups=group_grants(grants, filters.group_by) if filters.group_by else None,
+        expansions=expansions,
     )
 
 
@@ -1021,8 +1032,7 @@ BILLING_COVERAGE_NOTE = (
     "organization in the IAM hierarchy, so no scope bounds them and this may be more, or "
     "fewer, accounts than the organization you searched for resources. Roles are classified "
     "from the predefined catalogue; a role that is not in it is reported in "
-    "`unclassified_roles` rather than assumed safe. Group membership is not expanded: a "
-    "group grant applies to every member."
+    "`unclassified_roles` rather than assumed safe. " + MEMBERS_NOT_EXPANDED
 )
 
 _BILLING_REMEDY = (
@@ -1131,6 +1141,8 @@ def search_billing_grants(filters: BillingGrantFilters, session=None) -> Billing
     if truncated:
         grants = grants[: filters.limit]
 
+    expansions = _expand(grants, filters.expand_members, session=session)
+
     return BillingGrantList(
         min_risk=minimum.value,
         member_types=member_types,
@@ -1144,9 +1156,10 @@ def search_billing_grants(filters: BillingGrantFilters, session=None) -> Billing
             else ""
         ),
         unclassified_roles=sorted(unclassified),
-        coverage_note=BILLING_COVERAGE_NOTE,
+        coverage_note=_expansion_note(BILLING_COVERAGE_NOTE, expansions),
         grants=grants,
         groups=group_grants(grants, filters.group_by) if filters.group_by else None,
+        expansions=expansions,
     )
 
 
@@ -1271,3 +1284,110 @@ def list_visible_projects(session=None) -> list[VisibleProject]:
     )
     _VISIBLE_PROJECTS.put("projects", projects)
     return projects
+
+
+# --- Who is behind a member (expand_members) ----------------------------------
+#
+# A grant to `group:ops@x` or `projectOwner:p` names one member that stands for
+# many principals, and the headcount is usually the finding. These read who
+# they are, one level deep, from attached policy only -- the same attached-only
+# rule as every other IAM answer here. Opt-in: it turns an infrastructure
+# audit into a list of named people.
+
+CLOUD_IDENTITY_URL = "https://cloudidentity.googleapis.com/v1"
+CLOUD_IDENTITY_SERVICE = "cloudidentity.googleapis.com"
+PROJECT_ASSET_TYPE = "cloudresourcemanager.googleapis.com/Project"
+
+_GROUPS_REMEDY = (
+    ". Reading a group's members needs cloudidentity.googleapis.com enabled on the project "
+    "this request bills to, and a Groups Reader role in the Cloud Identity or Workspace "
+    "directory that owns the group -- a directory role, not a GCP one. Groups belonging to a "
+    "personal Google account cannot be read through this API."
+)
+
+
+def group_members(email: str, session=None) -> list[str]:
+    """Every principal in a group, nested groups flattened (Cloud Identity).
+
+    Two calls: a lookup from email to the group's resource name, then a
+    transitive membership search, which flattens nesting server-side so no
+    cycle-safe walk is needed here.
+    """
+    session = session or get_rest_session()
+    response = session.get(f"{CLOUD_IDENTITY_URL}/groups:lookup", params={"groupKey.id": email})
+    if not response.ok:
+        raise _rest_error(
+            response, f"Looking up group {email}", CLOUD_IDENTITY_SERVICE, _GROUPS_REMEDY
+        )
+    name = response.json()["name"]
+    memberships = _paginate(
+        session,
+        f"{CLOUD_IDENTITY_URL}/{name}/memberships:searchTransitiveMemberships",
+        {},
+        key="memberships",
+        what=f"Reading the members of group {email}",
+        service=CLOUD_IDENTITY_SERVICE,
+        remedy=_GROUPS_REMEDY,
+    )
+    return sorted(
+        {key["id"] for m in memberships for key in m.get("preferredMemberKey", []) if "id" in key}
+    )
+
+
+def project_role_members(
+    project: str, role: str, client: asset_v1.AssetServiceClient | None = None
+) -> list[str]:
+    """Members holding `role` in the policy attached to the project itself.
+
+    What `projectOwner:<project>` and its siblings stand for. Read through CAI,
+    scoped to the project and to its own asset type, so it needs only the
+    Cloud Asset Viewer this tool already requires. Inherited grants of the
+    role, from a folder or organization, are not included.
+    """
+    scope = f"projects/{project}"
+    request = asset_v1.SearchAllIamPoliciesRequest(scope=scope, asset_types=[PROJECT_ASSET_TYPE])
+    try:
+        results = list((client or get_client()).search_all_iam_policies(request=request))
+    except gcp_exceptions.GoogleAPICallError as exc:
+        raise _translate(exc, scope) from exc
+    return sorted(
+        {
+            member
+            for result in results
+            if result.resource.endswith(f"/projects/{project}")
+            for binding in result.policy.bindings
+            if binding.role == role
+            for member in binding.members
+        }
+    )
+
+
+def _expand(grants: list[Grant], requested: bool, client=None, session=None):
+    """Expansions for the members in `grants`, or None when not requested."""
+    if not requested:
+        return None
+    from app.expansion import expand_members  # imported here: it calls back into core
+
+    expansions = expand_members([g.member for g in grants], client=client, session=session)
+    for grant in grants:
+        found = expansions.get(grant.member)
+        if found is not None:
+            grant.member_count = found.count
+    return expansions
+
+
+def _expansion_note(note: str, expansions) -> str:
+    """Replace the "not expanded" caveat with what expansion actually did."""
+    if expansions is None:
+        return note
+    listed = [e for e in expansions.values() if e.members is not None]
+    failed = sorted(m for m, e in expansions.items() if e.error)
+    said = (
+        f"Expanded {len(listed)} member(s) that stand for other principals, one level deep and "
+        "from attached policy only: a group or project role inside one is listed, not expanded "
+        "again, and owners inherited from a folder or organization are not included. Names "
+        "are in `expansions`."
+    )
+    if failed:
+        said += f" {len(failed)} could not be read and still apply in full: {', '.join(failed)}."
+    return note.replace(MEMBERS_NOT_EXPANDED, said)

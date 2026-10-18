@@ -17,6 +17,8 @@ except `setup-gcp.sh`.
 | `gcloud-billing-grants.sh` / `_explorer_billing_grants.py` | The two sides of `compare-billing-grants.sh`, as sorted `resource<TAB>role<TAB>member` lines |
 | `compare-projects.sh` | Diff the `gcpe docs` scope picker (Resource Manager v3 search) against `gcloud projects list` (v1) |
 | `gcloud-list-projects.sh` / `_explorer_projects.py` | The two sides of `compare-projects.sh`, as sorted `project_id<TAB>number` lines |
+| `compare-member-expansion.sh` | Diff `--expand-members` against gcloud: project roles via Resource Manager `getIamPolicy` (the tool uses CAI), groups via `gcloud identity` |
+| `gcloud-expand-members.sh` / `_explorer_expansions.py` | The two sides of `compare-member-expansion.sh`, as sorted `member<TAB>principal` lines |
 | `check-noise.sh` | Checks that the noise-suppressed result is a strict subset of the full result |
 | `benchmark.py` | Records a latency baseline for the delivery plan |
 

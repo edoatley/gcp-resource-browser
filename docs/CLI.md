@@ -193,8 +193,24 @@ gcpe billing-grants --by member
   accounts (`…-compute@developer…`, `…@appspot…`) are always shown, because they are yours and
   often hold Editor. The rule is not applied to custom roles: one of yours named
   `…ServiceAgent` is still yours to review.
+- **Tables show each member without its type prefix, with the type on a dim line beneath**
+  (`sudoku-deploy@….iam.gserviceaccount.com` over `service account`). Emails and project IDs
+  are never shortened, because the domain is often the finding: a service account from another
+  project, or a personal account. Federated sets are shown as their pool and attribute
+  (`github-pool: repository = org/app`), with the full `principalSet://…` printed under the
+  table. `-o json` and `-o csv` always carry the exact member strings.
 - **Each result ends with what it cannot see.** Searching a project misses grants on its folders
-  and organisation, and groups are not expanded. Search the organisation for the full picture.
+  and organisation, and groups are not expanded unless you ask. Search the organisation for
+  the full picture.
+- **`--expand-members` shows who is behind a member** that stands for others. A group's count,
+  or a `projectOwner:p` member's count, appears in brackets after it. `-o json` names the
+  principals; CSV gains a `member_count` column but never the names. See
+  [Concepts](CONCEPTS.md#who-is-behind-a-member) for what is read and what is only explained.
+
+  ```bash
+  gcpe grants projects/my-project --role-risk medium --expand-members --by member
+  gcpe grants projects/my-project --expand-members -o json | jq .expansions
+  ```
 - With `-o json`/`csv`, these notes go to stderr. `--show-gcloud` prints one
   `gcloud asset search-all-iam-policies` command per permission batch.
 

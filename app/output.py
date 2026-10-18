@@ -91,7 +91,13 @@ def grants_to_csv(grants: GrantList | BillingGrantList) -> str:
     """One row per grant. Shared by the CAI and billing searches: a `Grant` is a
     `Grant` whichever API reported it, and one column set keeps the two diffable."""
     buffer = io.StringIO()
-    writer = csv.DictWriter(buffer, fieldnames=GRANT_CSV_COLUMNS, extrasaction="ignore")
+    # A count column only when expansion ran, so a plain export is unchanged.
+    # Never the names: a spreadsheet of named people should be a deliberate
+    # export (-o json), not a side effect of asking for headcounts.
+    columns = (
+        [*GRANT_CSV_COLUMNS, "member_count"] if grants.expansions is not None else GRANT_CSV_COLUMNS
+    )
+    writer = csv.DictWriter(buffer, fieldnames=columns, extrasaction="ignore")
     writer.writeheader()
     for grant in grants.grants:
         row = grant.model_dump(mode="json")

@@ -534,13 +534,21 @@ Administrator were the motivating examples.
   same rules and marked `custom`. `scripts/compare-roles.sh` reclassifies with jq and matches
   on the predefined catalogue (95 roles at high, 117 at medium) and on a scope holding a real
   custom role (96 and 118).
-- ☐ **Group expansion** via the Cloud Identity Groups API — written up as a pickup-ready
-  item in [`docs/todo/group-expansion-cloud-identity.md`](todo/group-expansion-cloud-identity.md).
-  Deliberately left: it needs a new API enabled, `roles/cloudidentity.groups.readonly` (a
-  Cloud Identity directory role, not a GCP one), and a transitive-membership call per distinct
-  group in the results, so it needs bounding the way fan-out is bounded. It is also the one
-  Phase 8 item this estate cannot verify at all — no organization means no GCP-visible groups.
-  Until it lands, every IAM-bearing response says group membership is not expanded.
+- ◐ **Who is behind a member** (`--expand-members` / `?expand_members=`), on `grants` and
+  `billing-grants`. Opt-in. Counts appear in the table and CSV, names only in JSON
+  (`expansions`). Each distinct member is read once, with concurrency capped at 8, and an
+  unreadable one is named rather than dropped.
+  - ☑ `projectOwner`/`Editor`/`Viewer` members, read from the project's attached policy
+    through CAI. Verified live on 2026-10-18: `scripts/compare-member-expansion.sh` matched
+    gcloud's Resource Manager `getIamPolicy` on all 4 projects with such members. These three
+    are also now accepted by `--member-type`; CAI's `memberTypes:` was verified to match
+    exactly their legacy bindings.
+  - ☑ `principalSet://`, `domain:`, `allUsers` and `allAuthenticatedUsers` are explained in
+    place. Verified live on the `github-pool` repository sets.
+  - ☐ `group:` via the Cloud Identity Groups API. It is built and unit-tested, but **unverified**:
+    this estate has no `group:` grants (checked on all 7 projects), and without an
+    organization there are no Cloud Identity groups to read. Handoff:
+    [`docs/todo/group-expansion-cloud-identity.md`](todo/group-expansion-cloud-identity.md).
 
 ### What the live checks settled
 

@@ -15,6 +15,8 @@ account on Cloud Run or GKE.
 | `roles/iam.roleViewer` | Each **scope** whose *custom* roles you list with `gcpe roles --scope`. Not needed for predefined roles. |
 | Cloud Billing API (`cloudbilling.googleapis.com`) enabled | The **quota project**. Needed only for `gcpe billing-grants` / `GET /v1/billing-grants`. |
 | `roles/billing.viewer` | Each **billing account** you want `gcpe billing-grants` to see. Without it the account is invisible, which the CLI reports rather than calling it clean. |
+| Cloud Identity API (`cloudidentity.googleapis.com`) enabled | The **quota project**. Needed only to expand `group:` members with `--expand-members`. |
+| Groups Reader (a Cloud Identity / Workspace **directory** role) | The directory that owns the groups. Not a GCP IAM role, so it is usually granted by a different admin. `projectOwner:`-style members need nothing extra. |
 
 Google returns HTTP 403 for both failures, but the fixes are different and usually apply to
 different projects. The tool tells them apart:

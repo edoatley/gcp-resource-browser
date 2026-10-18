@@ -184,6 +184,28 @@ class Grant(BaseModel):
     condition: str | None = Field(
         default=None, description="IAM condition expression, when the binding is conditional"
     )
+    member_count: int | None = Field(
+        default=None,
+        description=(
+            "How many principals the member stands for, when expand_members was requested and "
+            "it could be read. Names are in the response's `expansions`."
+        ),
+    )
+
+
+class MemberExpansion(BaseModel):
+    """Who is behind one member that stands for other principals."""
+
+    kind: str = Field(description="group, projectOwner, projectEditor, projectViewer, ...")
+    members: list[str] | None = Field(
+        default=None,
+        description="The principals it stands for; [] means read and empty, null means not read",
+    )
+    count: int | None = None
+    note: str | None = Field(
+        default=None, description="What the member means, when it cannot be listed"
+    )
+    error: str | None = Field(default=None, description="Why it could not be read")
 
 
 class GrantGroup(BaseModel):
@@ -223,6 +245,13 @@ class GrantList(BaseModel):
     groups: list[GrantGroup] | None = Field(
         default=None, description="Present when group_by was requested"
     )
+    expansions: dict[str, MemberExpansion] | None = Field(
+        default=None,
+        description=(
+            "Present when expand_members was requested: each member in the results that "
+            "stands for other principals, and who those are"
+        ),
+    )
 
 
 class BillingGrantList(BaseModel):
@@ -259,6 +288,13 @@ class BillingGrantList(BaseModel):
     grants: list[Grant]
     groups: list[GrantGroup] | None = Field(
         default=None, description="Present when group_by was requested"
+    )
+    expansions: dict[str, MemberExpansion] | None = Field(
+        default=None,
+        description=(
+            "Present when expand_members was requested: each member in the results that "
+            "stands for other principals, and who those are"
+        ),
     )
 
 

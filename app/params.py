@@ -88,6 +88,11 @@ class Help:
         "cannot be defined on a folder. Omit to list predefined roles only."
     )
     SHOW_ALL_AGENTS = "Include Google-managed service agents, hidden by default"
+    EXPAND_MEMBERS = (
+        "Show who is behind members that stand for other principals: a group (via Cloud "
+        "Identity), or projectOwner/Editor/Viewer (from that project's attached policy). "
+        "Off by default, because it lists named people."
+    )
     SHOW_ALL = (
         "Include resources hidden by default (enabled API services, image layers, "
         "auto-created default routes and subnets, and similar)"
@@ -127,6 +132,7 @@ class GrantFilters:
     show_all: bool = False
     limit: int | None = DEFAULT_LIMIT
     group_by: str | None = None
+    expand_members: bool = False
 
 
 @dataclass(frozen=True)
@@ -144,3 +150,4 @@ class BillingGrantFilters:
     show_all: bool = False
     limit: int | None = DEFAULT_LIMIT
     group_by: str | None = None
+    expand_members: bool = False

@@ -88,7 +88,7 @@ live from Google's catalogue.
 | `orgpolicy.policy.set` | high | Can disable organization policy guardrails | [rhino-part2](#rhino-part2) |
 | `deploymentmanager.deployments.create` | high | Deploys as the Google APIs service account, which has Editor by default | [rhino-part1](#rhino-part1) |
 | `storage.hmacKeys.create` | medium | Can mint Cloud Storage HMAC keys for a service account | [rhino-part2](#rhino-part2) |
-| `apikeys.keys.create` | medium | Can create API keys, which are unrestricted by default (formerly `serviceusage.apiKeys.create`, the name Rhino uses) | [gcp-api-keys-iam](#gcp-api-keys-iam), [gcp-api-keys](#gcp-api-keys), [rhino-part2](#rhino-part2) |
+| `apikeys.keys.create` | medium | Can create API keys, which are unrestricted by default. The API Keys API checks this permission; the older `serviceusage.apiKeys.create` that Rhino names still exists but no predefined role grants it | [gcp-api-keys-iam](#gcp-api-keys-iam), [gcp-api-keys](#gcp-api-keys), [rhino-part2](#rhino-part2) |
 | `storage.buckets.setIamPolicy` | medium | Can grant access to a bucket, including publicly | [rhino-part2](#rhino-part2) |
 | `secretmanager.secrets.setIamPolicy` | medium | Can grant access to a secret | [rhino-part2](#rhino-part2) |
 | `cloudfunctions.functions.setIamPolicy` | medium | Can grant invoke access to a function, including publicly | [rhino-part2](#rhino-part2) |

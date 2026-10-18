@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, FastAPI, Query
+from fastapi import APIRouter, FastAPI, Query, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -58,6 +58,8 @@ def catalogue_payload(scope: str, billing_project: str | None) -> dict:
                     if unavailable
                     else caps.to_gcloud(capability, example, scope, billing_project),
                     "streams": capability.route.endswith("/stream"),
+                    # The values a preset fills the builder with.
+                    "args": caps.filled_args(example, scope),
                 }
             )
         capabilities.append(
@@ -78,6 +80,9 @@ def catalogue_payload(scope: str, billing_project: str | None) -> dict:
                         "cli": "(positional)" if p.cli_positional else p.cli_flag,
                         "help": p.help,
                         "repeatable": p.is_list,
+                        "kind": p.kind,
+                        "required": p.required,
+                        "suggestions": list(p.suggestions),
                     }
                     for p in caps.params(capability.id)
                 ],
@@ -107,6 +112,22 @@ def session() -> dict:
 def catalogue(scope: str | None = Query(default=None)) -> dict:
     scope = core.validate_scope(scope or default_scope())
     return catalogue_payload(scope, core.session_context().quota_project)
+
+
+@router.get("/docs/_/render")
+def render(request: Request, capability: str = Query()) -> dict:
+    """The builder's three forms for whatever the user entered. Renders, never runs.
+
+    Takes the capability's own API parameter names, so a form value means
+    exactly what it means to the API. Problems come back in `errors` rather
+    than as a failed request, for showing next to the form.
+    """
+    found = caps.BY_ID.get(capability)
+    if found is None:
+        raise core.InvalidFilterError(f"Unknown capability {capability!r}.")
+    items = [(k, v) for k, v in request.query_params.multi_items() if k != "capability"]
+    example, errors = caps.example_from_query(found, items)
+    return caps.render(found, example, core.session_context().quota_project, errors)
 
 
 @router.get("/docs/_/projects")

@@ -3,7 +3,7 @@
 // reaches the page through textContent, never parsed as markup.
 "use strict";
 
-const state = { session: null, catalogue: null, scope: null };
+const state = { session: null, catalogue: null, scope: null, forms: {}, tab: 0 };
 const SCOPE_KEY = "gcpe-docs-scope";
 const MAX_ROWS = 100;
 // Response fields that qualify a result. Shown verbatim whenever present: an
@@ -204,57 +204,192 @@ function capabilityPage(c) {
       el("code", { text: `GET ${c.route}` }),
       el("a", { href: c.swagger, target: "_blank", rel: "noopener", text: "Swagger" }),
       c.docs.map((d) => el("a", { href: d.url, target: "_blank", rel: "noopener", text: d.label }))),
-    el("h2", { text: "Examples" }),
-    c.examples.map((ex) => exampleCard(c, ex)),
-    el("h2", { text: "Parameters" }),
-    c.params.length ? paramsTable(c) : el("p", { class: "muted", text: "None." }),
+    builder(c),
   ];
 }
 
-function paramsTable(c) {
-  return el("div", { class: "table-wrap" },
-    el("table", {},
-      el("thead", {}, el("tr", {}, el("th", { text: "API" }), el("th", { text: "CLI" }), el("th", { text: "Description" }))),
-      el("tbody", {}, c.params.map((p) =>
-        el("tr", {},
-          el("td", {}, el("code", { text: p.api }), p.repeatable ? el("span", { class: "badge", text: "repeatable" }) : null),
-          el("td", {}, p.cli ? el("code", { text: p.cli }) : el("span", { class: "muted", text: "—" })),
-          el("td", { text: p.help }))))));
+// --- The builder -------------------------------------------------------------------
+//
+// One form per capability, generated from its parameters. Examples are presets
+// that fill it. Every keystroke asks the server to render the three forms
+// (/docs/_/render): the page never assembles a command itself, so the forms
+// here are the same ones the tests pin against --show-gcloud.
+
+const RENDER_DELAY_MS = 250;
+const FORM_TABS = ["CLI", "API", "gcloud"];
+
+// The scope param is the header's when the route requires it. When it is
+// optional (roles), it is a switch: "also include the scope above".
+function scopeIsBound(p) { return p.api === "scope" && p.required; }
+function scopeIsSwitch(p) { return p.api === "scope" && !p.required; }
+
+function valuesFromArgs(c, args) {
+  const values = {};
+  for (const p of c.params) {
+    if (scopeIsBound(p)) continue;
+    if (scopeIsSwitch(p)) values.scope = "scope" in args;
+    else if (p.api in args) values[p.api] = args[p.api];
+  }
+  return values;
 }
 
-function exampleCard(c, ex) {
-  const origin = window.location.origin;
-  const forms = [
-    ["CLI", ex.cli, c.cli_command ? null : "No CLI form: use the API, or gcpe search -o json."],
-    ["API", origin + ex.url, null],
-    ["gcloud", ex.gcloud, ex.unavailable ? ex.unavailable : "No gcloud equivalent: this is gcpe's own data."],
-  ];
-  const body = el("div", { class: "form" });
+function builder(c) {
+  const saved = state.forms[c.id];
+  const first = c.examples.find((ex) => !ex.unavailable) || c.examples[0];
+  const form = saved || { values: valuesFromArgs(c, first.args), preset: first.id };
+  state.forms[c.id] = form;
+
+  const fields = el("div", { class: "fields" });
   const tabs = el("div", { class: "tabs", role: "tablist" });
+  const body = el("div", { class: "form" });
+  const errors = el("div", { class: "errors", "aria-live": "polite" });
   const result = el("div", { class: "result", "aria-live": "polite" });
+  const call = el("button", { type: "button", class: "primary", text: "Call API", disabled: true });
+  let rendered = null;
+  let timer = null;
 
-  const show = (index) => {
-    const [, text, absent] = forms[index];
+  const showTab = () => {
+    // Without a CLI form, open on the API rather than on a "no CLI" note.
+    const index = !c.cli_command && state.tab === 0 ? 1 : state.tab;
     tabs.querySelectorAll("button").forEach((b, i) => b.setAttribute("aria-selected", String(i === index)));
+    if (!rendered) return put(body, el("p", { text: "Rendering…" }));
+    const key = ["cli", "url", "gcloud"][index];
+    const text = key === "url" ? window.location.origin + rendered.url : rendered[key];
     put(body, text
       ? [el("pre", {}, el("code", { text })), copyButton(text)]
-      : el("p", { text: absent }));
+      : el("p", { text: rendered.notes[key] || "Not available." }));
   };
-  forms.forEach(([label], i) => tabs.append(el("button", { type: "button", role: "tab", onclick: () => show(i), text: label })));
-  show(c.cli_command ? 0 : 1);
+  FORM_TABS.forEach((label, i) => tabs.append(el("button", {
+    type: "button", role: "tab", text: label,
+    onclick: () => { state.tab = i; showTab(); },
+  })));
 
-  return el("section", { class: "example" },
-    el("header", {},
-      el("h3", { text: ex.title }),
-      ex.unavailable ? el("span", { class: "muted", text: ex.unavailable }) : null,
-      // Always the API, whichever tab is showing: the CLI and gcloud forms
-      // are for copying, and agree with it (checked by the tests, and live).
-      el("button", {
-        type: "button", class: "primary", disabled: Boolean(ex.unavailable),
-        title: `GET ${ex.url}`,
-        onclick: (event) => callApi(c, ex, result, event.currentTarget), text: "Call API",
-      })),
-    tabs, body, result);
+  const render = async () => {
+    const query = new URLSearchParams({ capability: c.id });
+    for (const p of c.params) {
+      const value = scopeIsBound(p) ? state.scope : form.values[p.api];
+      if (scopeIsSwitch(p)) { if (value) query.append("scope", state.scope); continue; }
+      if (Array.isArray(value)) value.forEach((v) => query.append(p.api, v));
+      else if (value === true) query.append(p.api, "true");
+      else if (value !== undefined && value !== false && value !== "") query.append(p.api, value);
+    }
+    try {
+      rendered = await getJSON(`/docs/_/render?${query}`);
+    } catch (error) {
+      rendered = { cli: null, url: "", gcloud: null, notes: {}, errors: [error.message] };
+    }
+    put(errors, rendered.errors.length
+      ? el("ul", { class: "error" }, rendered.errors.map((e) => el("li", { text: e })))
+      : null);
+    call.disabled = rendered.errors.length > 0;
+    call.title = rendered.errors.length ? "Fix the errors above first" : `GET ${rendered.url}`;
+    showTab();
+  };
+  const changed = () => {
+    form.preset = null;
+    markPreset();
+    clearTimeout(timer);
+    timer = setTimeout(render, RENDER_DELAY_MS);
+  };
+
+  const presets = el("div", { class: "presets" },
+    el("span", { class: "muted", text: "Start from an example:" }),
+    c.examples.map((ex) => el("button", {
+      type: "button", class: "preset", "data-id": ex.id, text: ex.title,
+      disabled: Boolean(ex.unavailable), title: ex.unavailable || "",
+      onclick: () => {
+        form.values = valuesFromArgs(c, ex.args);
+        form.preset = ex.id;
+        put(fields, c.params.map((p) => field(c, p, form, changed)));
+        put(result);
+        markPreset();
+        render();
+      },
+    })));
+  const markPreset = () => presets.querySelectorAll("button").forEach((b) =>
+    b.setAttribute("aria-pressed", String(b.dataset.id === form.preset)));
+
+  call.addEventListener("click", () => {
+    if (rendered) callApi(c, { url: rendered.url, streams: c.route.endsWith("/stream") }, result, call);
+  });
+
+  put(fields, c.params.map((p) => field(c, p, form, changed)));
+  markPreset();
+  render();
+
+  return el("section", { class: "builder", id: "builder" },
+    el("h2", { text: "Build a call" }),
+    presets,
+    c.params.length ? fields : el("p", { class: "muted", text: "This capability takes no parameters." }),
+    // Docked to the bottom of the screen while the form is in view, so an edit
+    // anywhere in a long form shows its effect without scrolling.
+    el("div", { class: "dock" },
+      el("h3", { text: "The same call, three ways" }),
+      tabs, body, errors,
+      el("div", { class: "actions" }, call,
+        el("span", { class: "muted", text: "Always runs the API form, whichever tab is showing." }))),
+    result);
+}
+
+function field(c, p, form, changed) {
+  const id = `f-${c.id}-${p.api}`;
+  const label = el("label", { for: id },
+    el("code", { text: p.api }),
+    p.required ? el("span", { class: "badge", text: "required" }) : null,
+    p.repeatable ? el("span", { class: "badge", text: "repeatable" }) : null);
+  const flag = p.cli ? el("span", { class: "flag" }, "CLI ", el("code", { text: p.cli })) : el("span", { class: "flag", text: "API only" });
+
+  if (scopeIsBound(p)) {
+    return el("div", { class: "field" }, label,
+      el("div", {}, el("code", { text: state.scope }), el("span", { class: "muted", text: " · from the Scope box above" }), flag,
+        el("small", { text: p.help })));
+  }
+
+  let input;
+  if (scopeIsSwitch(p) || p.kind === "bool") {
+    input = el("input", { id, type: "checkbox", checked: Boolean(form.values[p.api]) });
+    input.addEventListener("change", () => { form.values[p.api] = input.checked; changed(); });
+    const text = scopeIsSwitch(p) ? ` Use ${state.scope}` : " Yes";
+    input = el("label", { class: "check" }, input, text);
+  } else if (p.kind === "list") {
+    input = listInput(id, p, form, changed);
+  } else {
+    input = el("input", {
+      id, type: p.kind === "str" ? "text" : "number", spellcheck: "false",
+      min: p.kind === "int" ? "1" : p.kind === "float" ? "0" : null,
+      list: p.suggestions.length ? `${id}-options` : null,
+      value: form.values[p.api] ?? "",
+    });
+    input.addEventListener("input", () => { form.values[p.api] = input.value; changed(); });
+    if (p.suggestions.length) input = [input, options(`${id}-options`, p.suggestions)];
+  }
+  return el("div", { class: "field" }, label, el("div", {}, input, flag, el("small", { text: p.help })));
+}
+
+// One input per value, with an empty one always waiting at the end. Each can
+// offer suggestions, which a single comma-separated box could not.
+function listInput(id, p, form, changed) {
+  const box = el("div", { class: "list" });
+  const listId = p.suggestions.length ? `${id}-options` : null;
+  const sync = () => {
+    form.values[p.api] = [...box.querySelectorAll("input")].map((i) => i.value.trim()).filter(Boolean);
+    const inputs = [...box.querySelectorAll("input")];
+    if (inputs[inputs.length - 1].value) box.append(entry(""));
+    changed();
+  };
+  const entry = (value) => {
+    const input = el("input", { type: "text", spellcheck: "false", list: listId, value, placeholder: "add a value" });
+    input.addEventListener("input", sync);
+    return input;
+  };
+  const values = form.values[p.api] || [];
+  values.forEach((v, i) => box.append(i === 0 ? Object.assign(entry(v), { id }) : entry(v)));
+  box.append(values.length ? entry("") : Object.assign(entry(""), { id }));
+  return [box, listId ? options(listId, p.suggestions) : null];
+}
+
+function options(id, values) {
+  return el("datalist", { id }, values.map((v) => el("option", { value: v })));
 }
 
 function copyButton(text, target) {
@@ -381,6 +516,14 @@ async function renderStream(response, panel, started, url, c) {
 function emptyState(c, body) {
   const resources = ["search", "stream"].includes(c.id);
   const next = [
+    el("a", {
+      href: "#builder", text: "Edit the filters above",
+      onclick: (event) => {
+        event.preventDefault();
+        const first = document.querySelector(".builder .fields input");
+        if (first) first.focus();
+      },
+    }),
     resources ? el("a", { href: "#/summary", text: "See what this scope contains" }) : null,
     el("a", {
       href: "#", text: "Try another scope",

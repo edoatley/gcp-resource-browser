@@ -190,3 +190,49 @@ details pre { max-height: 360px; overflow: auto; padding: 10px; background: var(
 
 .empty { padding: 10px 12px; border: 1px dashed var(--border); border-radius: 6px; font-size: 14px; }
 .empty p { margin: 4px 0; }
+
+/* The builder */
+.builder h3 { margin: 22px 0 6px; font-size: 15px; }
+.presets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 16px; font-size: 13px; }
+.presets .preset { border-radius: 14px; padding: 3px 12px; }
+.presets .preset[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.fields { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.field { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 4px 16px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.field:last-child { border-bottom: none; }
+.field label { padding-top: 5px; }
+.field input[type="text"], .field input[type="number"] {
+  width: min(420px, 100%);
+  padding: 5px 8px;
+  font: 13px var(--mono);
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.field small { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
+.field .flag { margin-left: 10px; font-size: 12px; color: var(--muted); }
+.field .check { display: inline-flex; align-items: center; gap: 6px; padding-top: 4px; font-size: 13px; }
+.list { display: inline-flex; flex-direction: column; gap: 4px; width: min(420px, 100%); vertical-align: top; }
+.list input { width: 100% !important; }
+.errors ul { margin: 8px 0 0; padding-left: 28px; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 12px 0; font-size: 13px; }
+.builder .form { margin: 0; }
+.builder .result { margin: 0; }
+
+@media (max-width: 760px) {
+  .field { grid-template-columns: minmax(0, 1fr); }
+  .field .flag { display: block; margin: 4px 0 0; }
+}
+.dock {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  max-height: 45vh;
+  overflow-y: auto;
+  margin-top: 16px;
+  padding: 2px 0 2px;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -6px 12px -10px rgba(0, 0, 0, .35);
+}
+.dock h3 { margin-top: 10px; }

@@ -340,3 +340,118 @@ def test_page_script_puts_nodes_through_one_flattening_helper() -> None:
     script = (docs_site.STATIC_DIR / "docs.js").read_text()
     assert script.count(".replaceChildren(") == 1
     assert "parent.replaceChildren(...nodes(children))" in script
+
+
+# --- The parameter builder --------------------------------------------------------
+
+
+def _render(docs, capability: str, **params):
+    return docs.get("/docs/_/render", params={"capability": capability, **params}).json()
+
+
+def _pairs(args: dict) -> list[tuple[str, str]]:
+    pairs = []
+    for key, value in args.items():
+        if isinstance(value, bool):
+            pairs.append((key, "true"))
+        elif isinstance(value, list):
+            pairs.extend((key, v) for v in value)
+        else:
+            pairs.append((key, value))
+    return pairs
+
+
+def test_every_preset_renders_exactly_as_the_catalogue_does(docs, adc) -> None:
+    """The builder and the catalogue must be one renderer, not two that agree today."""
+    adc(
+        _credentials(
+            "google.oauth2.service_account", service_account_email="sa@p.iam", quota_project_id="q"
+        )
+    )
+    catalogue = docs.get("/docs/_/catalogue", params={"scope": "projects/p"}).json()
+
+    for capability in catalogue["capabilities"]:
+        for example in capability["examples"]:
+            query = [("capability", capability["id"]), *_pairs(example["args"])]
+            rendered = docs.get("/docs/_/render", params=query).json()
+
+            where = f"{capability['id']}:{example['id']}"
+            assert rendered["errors"] == [], where
+            assert rendered["cli"] == example["cli"], where
+            assert rendered["url"] == example["url"], where
+            assert rendered["gcloud"] == example["gcloud"], where
+
+
+def test_render_reports_every_problem_inline(docs) -> None:
+    body = _render(
+        docs, "search", scope="projects/p", type="nonsense", sort="bogus", label="=bad", limit="0"
+    )
+
+    errors = " ".join(body["errors"])
+    assert "Unsupported resource type 'nonsense'" in errors
+    assert "Cannot sort by 'bogus'" in errors
+    assert "Invalid label filter" in errors
+    assert "limit must be at least 1" in errors
+    assert body["gcloud"] is None
+    assert "Fix the errors" in body["notes"]["gcloud"]
+
+
+@pytest.mark.parametrize(
+    ("capability", "params", "message"),
+    [
+        ("search", {"nope": "1", "scope": "projects/p"}, "Unknown parameter 'nope'"),
+        ("search", {}, "scope is required"),
+        ("search", {"scope": "nope"}, "Invalid scope"),
+        ("roles", {"scope": "folders/1"}, "cannot be defined on a folder"),
+        ("roles", {"risk": "extreme"}, "Unknown risk level"),
+        ("grants", {"scope": "projects/p", "member_type": "robot"}, "Unknown member type"),
+        ("grants", {"scope": "projects/p", "group_by": "x"}, "Cannot group by 'x'"),
+        ("grants", {"scope": "projects/p", "limit": "ten"}, "limit must be a number"),
+    ],
+)
+def test_render_names_the_problem(docs, capability, params, message) -> None:
+    body = _render(docs, capability, **params)
+    assert any(message in error for error in body["errors"]), body["errors"]
+
+
+def test_render_explains_a_missing_form(docs, adc) -> None:
+    adc(_credentials("google.oauth2.service_account", service_account_email="sa@p.iam"))
+
+    stream = _render(docs, "stream", scope="projects/p")
+    project = _render(docs, "search", scope="projects/p", project="other")
+    types = _render(docs, "types")
+
+    assert stream["cli"] is None and "No CLI form" in stream["notes"]["cli"]
+    assert project["gcloud"] is None and "--show-gcloud" in project["notes"]["gcloud"]
+    assert project["cli"] == "gcpe search projects/p --project other"
+    assert types["gcloud"] is None and types["url"] == "/v1/types"
+
+
+def test_render_rejects_an_unknown_capability(docs) -> None:
+    assert docs.get("/docs/_/render", params={"capability": "bogus"}).status_code == 400
+
+
+def test_render_is_browser_only(serve) -> None:
+    assert serve.get("/docs/_/render", params={"capability": "search"}).status_code == 404
+
+
+def test_catalogue_describes_each_field(docs, adc) -> None:
+    adc(_credentials("google.oauth2.service_account", service_account_email="sa@p.iam"))
+    catalogue = docs.get("/docs/_/catalogue", params={"scope": "projects/p"}).json()
+    search = {
+        p["api"]: p for c in catalogue["capabilities"] if c["id"] == "search" for p in c["params"]
+    }
+
+    assert search["scope"]["required"] is True
+    assert search["limit"]["kind"] == "int"
+    assert search["show_all"]["kind"] == "bool"
+    assert search["type"]["kind"] == "list"
+    assert "bucket" in search["type"]["suggestions"]
+    assert "createTime DESC" in search["sort"]["suggestions"]
+
+
+def test_page_never_assembles_a_command_itself() -> None:
+    """Every command string comes from /docs/_/render, so the page cannot drift from it."""
+    script = (docs_site.STATIC_DIR / "docs.js").read_text()
+    assert not re.search(r"""["'`]--""", script), "docs.js builds a CLI flag"
+    assert "gcloud asset" not in script

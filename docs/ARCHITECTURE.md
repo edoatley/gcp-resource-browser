@@ -194,10 +194,18 @@ their examples, and derives everything else from the code that implements them.
 ### The browser over it
 
 `app/docs_site.py` builds a separate app for `gcpe docs`. Its own routes come first
-(`/docs`, `/docs/static`, and `/docs/_/{catalogue,session,projects}`), and everything else
-falls through to the unchanged API app. "Call API" is therefore a plain `fetch` of a `/v1` URL
-that the catalogue rendered. There is no run endpoint, no shell, and nothing the API would not
+(`/docs`, `/docs/static`, and `/docs/_/{catalogue,session,projects,render}`), and everything
+else falls through to the unchanged API app. "Call API" is therefore a plain `fetch` of a `/v1`
+URL that the server rendered. There is no run endpoint, no shell, and nothing the API would not
 accept from any other client.
+
+The page's form posts nothing. On each edit it asks `/docs/_/render` for the three forms of
+what was entered. That endpoint builds an `Example` with `capabilities.example_from_query`,
+checks it with `capabilities.validate`, which calls the core's own validators, and renders it
+with `to_cli` / `to_url` / `to_gcloud`. The page never assembles a command (a test greps
+`docs.js` for flag building), so the builder and the catalogue are one renderer. A
+`project` filter gets no gcloud form, because resolving the ID is a call; the page says so
+rather than inventing a number.
 
 `gcpe serve` never builds this app. On a server, `/docs` redirects to Swagger at `/api/docs`.
 The session context (`core.session_context`) is read locally, apart from one best-effort

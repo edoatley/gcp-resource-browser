@@ -31,8 +31,8 @@ from fastapi.routing import APIRoute
 from typer.models import ArgumentInfo, OptionInfo
 
 from app import core, gcloud, role_risk
-from app.params import Help
-from app.query import build_query
+from app.params import SORTABLE_FIELDS, Help
+from app.query import QueryError, build_query
 
 # Substituted with the caller's scope when an example is rendered, so the
 # browser can show the logged-in session's scope rather than a placeholder.
@@ -97,6 +97,12 @@ class Param:
     help_name: str | None
     is_list: bool
     is_bool: bool
+    # "str", "int", "float", "bool" or "list", from the route's annotation.
+    kind: str = "str"
+    required: bool = False
+    # Known-good values to offer, from the same sources the code validates
+    # against. Not a closed list: raw asset types and RE2 patterns are valid too.
+    suggestions: tuple[str, ...] = ()
 
 
 CAPABILITIES: tuple[Capability, ...] = (
@@ -317,6 +323,10 @@ def params(capability_id: str) -> tuple[Param, ...]:
         name = _help_name(description)
         flag, positional = cli_by_help.get(name, (None, False)) if name else (None, False)
         annotation = str(parameter.annotation)
+        kind = next(
+            (k for k in ("list", "bool", "int", "float") if annotation.startswith(k)), "str"
+        )
+        is_required = getattr(parameter.default, "is_required", lambda: False)()
         found.append(
             Param(
                 api=parameter.name,
@@ -326,9 +336,27 @@ def params(capability_id: str) -> tuple[Param, ...]:
                 help_name=name,
                 is_list=annotation.startswith("list"),
                 is_bool=annotation == "bool",
+                kind=kind,
+                required=is_required,
+                suggestions=_suggestions(name),
             )
         )
     return tuple(found)
+
+
+def _suggestions(help_name: str | None) -> tuple[str, ...]:
+    """Values worth offering for a parameter, keyed by the Help text it shares."""
+    if help_name == "TYPE":
+        return tuple(sorted(core.ASSET_TYPES))
+    if help_name == "SORT":
+        return tuple(v for f in SORTABLE_FIELDS for v in (f, f"{f} DESC"))
+    if help_name == "MEMBER_TYPE":
+        return role_risk.MEMBER_TYPES
+    if help_name == "RISK":
+        return tuple(r.value for r in role_risk.Risk)
+    if help_name == "GROUP_BY":
+        return ("member", "role")
+    return ()
 
 
 # --- Rendering ----------------------------------------------------------------
@@ -350,6 +378,11 @@ def _param(capability: Capability, api_name: str) -> Param:
         if param.api == api_name:
             return param
     raise KeyError(f"{capability.id} has no parameter {api_name!r}")
+
+
+def filled_args(example: Example, scope: str) -> dict:
+    """An example's arguments with the scope filled in."""
+    return _filled(example, scope)
 
 
 def to_url(capability: Capability, example: Example, scope: str) -> str:
@@ -436,3 +469,134 @@ def to_gcloud(
     if capability.id == "billing-grants":
         return gcloud.billing_grants_command()
     raise KeyError(f"No gcloud renderer for {capability.id}")
+
+
+# --- Building an example from user input (the `gcpe docs` builder) -------------
+#
+# The browser sends form values; these turn them into an Example and say what
+# is wrong with them, using the validators the core itself uses, so an error
+# here is the error the call would give. Nothing is executed.
+
+
+def example_from_query(
+    capability: Capability, items: Sequence[tuple[str, str]]
+) -> tuple[Example, list[str]]:
+    """An Example from `(name, value)` pairs, plus any parse errors."""
+    known = {p.api: p for p in params(capability.id)}
+    args: dict[str, str | bool | list[str]] = {}
+    errors: list[str] = []
+    for name, raw in items:
+        param = known.get(name)
+        if param is None:
+            errors.append(f"Unknown parameter {name!r} for {capability.route}.")
+            continue
+        value = raw.strip()
+        if param.kind == "list":
+            if value:
+                args.setdefault(name, []).append(value)
+        elif param.kind == "bool":
+            if value.lower() in ("true", "1", "on"):
+                args[name] = True
+        elif value:
+            if param.kind in ("int", "float"):
+                try:
+                    number = float(value) if param.kind == "float" else int(value)
+                except ValueError:
+                    errors.append(f"{name} must be a number, not {value!r}.")
+                    continue
+                if number < (0 if param.kind == "float" else 1):
+                    errors.append(f"{name} must be at least {0 if param.kind == 'float' else 1}.")
+                    continue
+            args[name] = value
+    for param in known.values():
+        if param.required and param.api not in args:
+            errors.append(f"{param.api} is required.")
+    return Example("custom", "Custom", args), errors
+
+
+def validate(capability: Capability, example: Example) -> list[str]:
+    """What the call would reject, found with the core's own validators."""
+    args = example.args
+    checks = []
+    if "scope" in args:
+        if capability.id == "roles":
+            checks.append(lambda: core.validate_role_scope(args["scope"]))
+        else:
+            checks.append(lambda: core.validate_scope(args["scope"]))
+    if "type" in args:
+        checks.append(lambda: core.resolve_asset_types(list(args["type"])))
+    if any(k in args for k in ("q", "label", "location", "raw_query")):
+        checks.append(
+            lambda: build_query(
+                free_text=args.get("q", ""),
+                labels=args.get("label", []),
+                locations=args.get("location", []),
+                raw=args.get("raw_query", ""),
+            )
+        )
+    if "sort" in args:
+        checks.append(lambda: core.build_order_by(args["sort"]))
+    for key in ("risk", "role_risk"):
+        if key in args:
+            checks.append(lambda key=key: role_risk.parse_risk(args[key]))
+    if "member_type" in args:
+        checks.append(lambda: role_risk.validate_member_types(args["member_type"]))
+    if args.get("group_by") not in (None, "member", "role"):
+        checks.append(
+            lambda: _raise(f"Cannot group by {args['group_by']!r}. Choose member or role.")
+        )
+
+    errors = []
+    for check in checks:
+        try:
+            check()
+        except (core.ResourceExplorerError, QueryError, role_risk.RiskRuleError) as exc:
+            errors.append(str(exc))
+    return errors
+
+
+def _raise(message: str) -> None:
+    raise core.InvalidFilterError(message)
+
+
+def render(
+    capability: Capability,
+    example: Example,
+    billing_project: str | None,
+    parse_errors: Sequence[str] = (),
+) -> dict:
+    """The three forms of an example, each with a reason when it cannot be given.
+
+    `parse_errors` come from `example_from_query`; with any of them the
+    example is incomplete, so no gcloud form is compiled from it.
+    """
+    errors = [*parse_errors, *validate(capability, example)]
+    notes: dict[str, str] = {}
+
+    try:
+        cli = to_cli(capability, example, "")
+    except ValueError as exc:
+        cli, notes["cli"] = None, str(exc)
+    if cli is None and "cli" not in notes:
+        notes["cli"] = "No CLI form: use the API, or gcpe search -o json."
+
+    gcloud_form = None
+    if not capability.has_gcloud:
+        notes["gcloud"] = "No gcloud equivalent: this is gcpe's own data."
+    elif errors:
+        notes["gcloud"] = "Fix the errors above to see the gcloud form."
+    elif "project" in example.args:
+        notes["gcloud"] = (
+            "The project filter is resolved from IDs to numbers when the search runs, which "
+            "takes a call; run the CLI form with --show-gcloud to see the exact command."
+        )
+    else:
+        gcloud_form = to_gcloud(capability, example, "", billing_project)
+
+    return {
+        "cli": cli,
+        "url": to_url(capability, example, ""),
+        "gcloud": gcloud_form,
+        "notes": notes,
+        "errors": errors,
+    }

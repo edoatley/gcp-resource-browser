@@ -313,6 +313,7 @@ through the form exactly as the catalogue renders it. So the page cannot drift f
 | `5` | Cloud Asset Inventory call failed |
 | `6` | Cloud Asset API not enabled on the **quota** project (see [GCP setup](GCP_SETUP.md)) |
 | `7` | Partial: some `--also-scope` scopes answered and some failed |
+| `8` | The [site config](CONFIGURATION.md) is invalid. The message names the file and what is wrong; nothing runs until it is fixed. |
 
 ## Running from the container
 

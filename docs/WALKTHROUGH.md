@@ -378,8 +378,8 @@ gcloud iam roles delete gcpe_walkthrough --project=gcp-sandbox-2026-18798
 cat > gcp-explorer.json <<'JSON'
 {"role_risk_rules": [{"permission": "iam.serviceAccounts.actAs", "risk": "medium", "reason": "test"}]}
 JSON
-uv run gcpe roles          # refused with a ConfigError: "lowers it from high to medium ...
-                           # add \"downgrade\": true" (currently printed as a Python traceback)
+uv run gcpe roles; echo "exit $?"   # one line: "Error: invalid site configuration. ... lowers it
+                                    # from high to medium ... add \"downgrade\": true", exit 8
 # Add "downgrade": true and rerun: it works, and the closing note names the downgrade.
 rm gcp-explorer.json
 ```

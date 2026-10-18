@@ -196,6 +196,15 @@ uv run gcpe search projects/idp-prototype-edo --type bucket -o json \
     2>/dev/null | jq '.[0] | has("iam_bindings")'      # false
 ```
 
+Now add what each bucket inherits. Expect the project's four bindings on each bucket (including
+`roles/owner`), marked `inherited_from` the project, and nothing from above the project:
+
+```bash
+uv run gcpe search projects/idp-prototype-edo --type bucket --include-iam --effective -o json \
+    2>/dev/null | jq '.[] | {display_name, inherited: [.iam_bindings[] | select(.inherited_from) | .role]}'
+./scripts/compare-effective-iam.sh --scope projects/idp-prototype-edo --type bucket   # MATCH: 8
+```
+
 ## 12. Concurrency and caching (Phase 4)
 
 ```bash

@@ -279,7 +279,9 @@ Every response states this in `coverage_note`:
 - **Grants above the scope.** Searching a project cannot see grants made on its folder or
   organization, even though they apply to the project. Search the organization to cover every
   level. A grant made on a parent applies to everything beneath it, so an organization-wide
-  search shows every grant that applies to each resource in it.
+  search shows every grant that applies to each resource in it. Effective IAM does not get
+  around this. Cloud Asset Inventory returns inherited policies only "up to the scope", so
+  `--effective` on a project scope never reaches the folder or organization either.
 - **Billing account IAM.** CAI does not index billing accounts: it rejects `billingAccounts/…`
   as a scope. A `billing.admin` grant made **on the organization** is found. A grant made
   **on the billing account itself** is not yet. This is planned, using the Cloud Billing API.

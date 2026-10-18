@@ -127,6 +127,34 @@ fully answer "who can reach this bucket". Every response that includes IAM carri
 | absent / `null` | IAM was not requested |
 | `[]` | IAM was requested, and nothing is attached |
 
+### Inherited bindings (`effective`)
+
+Add `--effective` / `?effective=true` (with IAM included) to also attach the bindings each
+resource **inherits**. These are the ones attached to its project, or to a parent resource such
+as the dataset above a table. Each inherited binding carries `inherited_from`, the full resource
+name it is attached to. Bindings with no `inherited_from` are attached to the resource itself.
+
+**Inheritance stops at the search scope.** That limit is Cloud Asset Inventory's, not this
+tool's: the API returns ancestors "up to the scope". A project scope therefore shows what a
+bucket inherits from its project, and never what the project inherits from its folder or
+organization. Search a folder or organization scope to include those. The `iam_note` on every
+such response says where inheritance stopped.
+
+It costs one extra call per 20 resources, with at most 8 in flight. The resources come from a
+result already capped by `limit`, so the cost is bounded. A resource whose inherited bindings
+cannot be read keeps its attached bindings, is listed in `iam_errors` with the reason, and makes
+the CLI exit 7 (partial). Cloud Asset Inventory cannot resolve workload identity pools this way,
+because it names them by project number, so they always appear in `iam_errors`.
+
+Conditions are not shown on attached or inherited bindings, so a conditional grant reads as
+unconditional.
+
+| `iam_errors` | Meaning |
+|:---|:---|
+| absent | `effective` was not requested |
+| `{}` | Every resource's inherited bindings were read |
+| `{name: reason}` | Those resources show attached bindings only |
+
 ## Caching
 
 Caching is off by default. `--cache-ttl SECONDS` / `?cache_ttl=` caches identical searches for

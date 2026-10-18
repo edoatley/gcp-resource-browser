@@ -233,3 +233,29 @@ def test_expansions_helper_emits_sorted_tsv_and_fails_on_unreadable(monkeypatch,
     monkeypatch.setattr(core, "project_role_members", denied)
     assert _explorer_expansions.main() == 1
     assert "could not expand projectOwner:p" in capsys.readouterr().err
+
+
+def test_effective_iam_helper_emits_inherited_bindings_and_gaps(
+    use_fake, monkeypatch, capsys
+) -> None:
+    """Attached bindings are left out; an unreadable resource is a line, not a silence."""
+    from scripts import _explorer_effective_iam
+    from tests.conftest import make_iam_result
+
+    project = "//cloudresourcemanager.googleapis.com/projects/p"
+    names = ["//storage.googleapis.com/a", "//storage.googleapis.com/gone"]
+    use_fake(
+        FakeAssetClient(
+            results=[make_search_result(name=n) for n in names],
+            iam_policies=[make_iam_result(resource=n) for n in names],
+            effective={names[0]: [(project, {"roles/owner": ("user:o@example.com",)})]},
+        )
+    )
+    monkeypatch.setattr("sys.argv", ["_explorer_effective_iam", "--scope", "projects/p"])
+
+    assert _explorer_effective_iam.main() == 0
+
+    assert capsys.readouterr().out.splitlines() == [
+        f"{names[0]}\t{project}\troles/owner\tuser:o@example.com",
+        f"{names[1]}\tUNREADABLE",
+    ]

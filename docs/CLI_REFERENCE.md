@@ -253,6 +253,6 @@ $ gcpe docs [OPTIONS]
 **Options**:
 
 * `--host <str>`: Address to bind  [default: 127.0.0.1]
-* `--port <int>`: Port to bind  [default: 8000]
+* `--port <int>`: Port to bind  [default: 8765]
 * `--no-browser`: Do not open a browser
 * `--help`: Show this message and exit.

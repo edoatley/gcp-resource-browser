@@ -317,7 +317,7 @@ def test_docs_binds_loopback_and_opens_the_browser(launched) -> None:
 
     assert result.exit_code == 0, result.output
     assert launched["host"] == "127.0.0.1"
-    assert launched["opened"] == ["http://127.0.0.1:8000/docs"]
+    assert launched["opened"] == ["http://127.0.0.1:8765/docs"]
     # The browser app, not the bare API app, whose /docs is a redirect.
     page = TestClient(launched["app"]).get("/docs", follow_redirects=False)
     assert page.status_code == 200

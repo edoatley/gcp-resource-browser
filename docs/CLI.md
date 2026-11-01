@@ -268,8 +268,8 @@ than for one-off CLI runs. See [Concepts → caching](CONCEPTS.md#caching).
 ## Browsing every capability
 
 ```bash
-uv run gcpe docs                 # opens http://127.0.0.1:8000/docs
-uv run gcpe docs --no-browser --port 8080
+uv run gcpe docs                 # opens http://127.0.0.1:8765/docs
+uv run gcpe docs --no-browser --port 9000
 ```
 
 A page per capability. Each one leads with **Build a call**:

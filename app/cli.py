@@ -837,7 +837,7 @@ _LOOPBACK = ("127.0.0.1", "localhost", "::1")
 @cli.command("docs")
 def docs_command(
     host: str = typer.Option("127.0.0.1", help="Address to bind"),
-    port: int = typer.Option(8000, help="Port to bind"),
+    port: int = typer.Option(8765, help="Port to bind"),
     no_browser: bool = typer.Option(False, "--no-browser", help="Do not open a browser"),
 ) -> None:
     """Open the interactive capability browser: every capability, with runnable examples.

@@ -102,6 +102,9 @@ def search_resources(
     show_all: bool = Query(default=False, description=Help.SHOW_ALL),
     sort: list[str] = Query(default_factory=list, description=Help.SORT, examples=[["name"]]),
     include_iam: bool = Query(default=False, description=Help.INCLUDE_IAM),
+    effective: bool = Query(
+        default=False, description=f"{Help.EFFECTIVE_IAM} Requires include_iam=true."
+    ),
     cache_ttl: float = Query(default=0.0, ge=0, le=3600, description=Help.CACHE_TTL),
 ) -> ResourceList:
     result = core.search_resources(
@@ -117,6 +120,7 @@ def search_resources(
             show_all=show_all,
             sort=sort,
             include_iam=include_iam,
+            effective_iam=effective,
             cache_ttl=cache_ttl,
         )
     )
@@ -129,6 +133,7 @@ def search_resources(
         suppressed=result.suppressed,
         suppressed_summary=result.suppressed_summary,
         iam_note=result.iam_note,
+        iam_errors=result.iam_errors,
         data=result.resources,
     )
 

@@ -56,7 +56,8 @@ $ gcpe search [OPTIONS] {scope} [term]
 * `--show-gcloud`: Print the equivalent `gcloud asset search-all-resources` command
 * `--show-all`: Include resources hidden by default (enabled API services, image layers, auto-created default routes and subnets, and similar)
 * `--sort <str>`: Sort field, with optional ` DESC`. Repeatable for tie-breaks. One of: name, assetType, project, displayName, description, location, createTime, updateTime, state, parentFullResourceName, parentAssetType.
-* `--include-iam`: Attach each resource&#x27;s directly-attached IAM bindings. One extra call for the whole scope. Inherited bindings are not included.
+* `--include-iam`: Attach each resource&#x27;s directly-attached IAM bindings. One extra call for the whole scope. Inherited bindings are not included unless effective is also set.
+* `--effective`: With IAM included, also attach the bindings each resource inherits from its ancestors, up to and including the scope, marked `inherited_from`. Grants made above the scope are not visible. One extra call per 20 resources. Needs --include-iam.
 * `-o, --output <table|json|csv>`: Output format  [default: table]
 * `--also-scope <str>`: Additional scope to search concurrently; repeatable
 * `--max-concurrency <int range>`: Maximum concurrent scope searches when several scopes are given  [default: 8; x&gt;=1]

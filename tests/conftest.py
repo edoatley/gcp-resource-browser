@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 from google.api_core import exceptions as gcp_exceptions
 from google.cloud import asset_v1
+from google.iam.v1.policy_pb2 import Binding, Policy
 from google.rpc.error_details_pb2 import ErrorInfo
 
 from app.params import SearchFilters
@@ -70,6 +71,8 @@ class FakeAssetClient:
         raises: Exception | None = None,
         projects: list[asset_v1.ResourceSearchResult] | None = None,
         iam_policies: list[asset_v1.IamPolicySearchResult] | None = None,
+        effective: dict[str, list[tuple[str, dict[str, tuple[str, ...]]]]] | None = None,
+        effective_raises: Exception | None = None,
     ) -> None:
         self.results = results or []
         self.raises = raises
@@ -80,6 +83,53 @@ class FakeAssetClient:
         self.requests: list[asset_v1.SearchAllResourcesRequest] = []
         self.iam_request: asset_v1.SearchAllIamPoliciesRequest | None = None
         self.iam_requests: list[asset_v1.SearchAllIamPoliciesRequest] = []
+        # name -> [(attached_resource, {role: members})], resource first, then
+        # ancestors, as the API orders them. A name absent from it is unknown.
+        self.effective = effective or {}
+        self.effective_raises = effective_raises
+        self.effective_requests: list[asset_v1.BatchGetEffectiveIamPoliciesRequest] = []
+
+    def batch_get_effective_iam_policies(
+        self, request: asset_v1.BatchGetEffectiveIamPoliciesRequest
+    ) -> asset_v1.BatchGetEffectiveIamPoliciesResponse:
+        """Behaves as the live API was observed to (2026-10-18).
+
+        More than 20 names is InvalidArgument, and one unknown name fails the
+        whole call with NotFound rather than being skipped.
+        """
+        self.effective_requests.append(request)
+        if self.effective_raises is not None:
+            raise self.effective_raises
+        if len(request.names) > 20:
+            raise gcp_exceptions.InvalidArgument("Some specified value(s) are invalid.")
+        unknown = [n for n in request.names if n not in self.effective]
+        if unknown:
+            raise gcp_exceptions.NotFound(
+                f"No resource found in resource search for <{unknown[0]}> in requested scope "
+                f"<{request.scope}>"
+            )
+        effective = asset_v1.BatchGetEffectiveIamPoliciesResponse.EffectiveIamPolicy
+        response = asset_v1.BatchGetEffectiveIamPoliciesResponse(
+            policy_results=[
+                effective(
+                    full_resource_name=name,
+                    policies=[
+                        effective.PolicyInfo(
+                            attached_resource=attached,
+                            policy=Policy(
+                                bindings=[
+                                    Binding(role=role, members=list(members))
+                                    for role, members in bindings.items()
+                                ]
+                            ),
+                        )
+                        for attached, bindings in self.effective[name]
+                    ],
+                )
+                for name in request.names
+            ]
+        )
+        return response
 
     def search_all_iam_policies(self, request: asset_v1.SearchAllIamPoliciesRequest):
         self.iam_request = request

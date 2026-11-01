@@ -56,6 +56,7 @@ Parameters marked *repeatable* are passed more than once:
 | `show_all` | bool | `false` | Disable noise reduction |
 | `sort` | repeatable | | Sortable field, optionally followed by ` DESC` (URL-encode the space) |
 | `include_iam` | bool | `false` | Attach directly-attached IAM bindings |
+| `effective` | bool | `false` | With `include_iam`, also attach inherited bindings, up to and including the scope. 400 without `include_iam`. |
 | `cache_ttl` | float, 0–3600 | `0` | Seconds to cache this exact search. 0 disables caching. |
 
 ```bash
@@ -101,10 +102,11 @@ Response (`ResourceList`):
 | `query` | The CAI query the filters compiled to. Check this when a result looks short. |
 | `truncated` | `true` when `limit` cut the result short and more resources exist |
 | `suppressed`, `suppressed_summary` | How many rows noise reduction hid, and why |
-| `iam_note` | Present when `include_iam=true`. States that inherited bindings are excluded. |
+| `iam_note` | Present when `include_iam=true`. Says whether inherited bindings were included, and where inheritance stopped. |
+| `iam_errors` | Present only with `effective=true`: resource → why its inherited bindings could not be read |
 | `data[].project` | Project **number**, as CAI reports it |
 | `data[].project_id` | Project ID, recovered where possible. `null` when the parent is not a project. |
-| `data[].iam_bindings` | `null` when IAM was not requested, `[]` when it was and none are attached, otherwise `[{"role", "members"}]` |
+| `data[].iam_bindings` | `null` when IAM was not requested, `[]` when it was and none are attached, otherwise `[{"role", "members"}]`, plus `inherited_from` on inherited bindings when `effective=true` |
 
 ### `GET /v1/resources/stream`
 

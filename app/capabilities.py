@@ -140,6 +140,11 @@ CAPABILITIES: tuple[Capability, ...] = (
                 {"scope": SCOPE, "type": ["bucket"], "include_iam": True},
             ),
             Example(
+                "buckets-with-effective-iam",
+                "Buckets with attached and inherited IAM bindings",
+                {"scope": SCOPE, "type": ["bucket"], "include_iam": True, "effective": True},
+            ),
+            Example(
                 "show-hidden",
                 "Everything, including resources hidden by default",
                 {"scope": SCOPE, "show_all": True, "limit": "50"},
@@ -460,6 +465,7 @@ def to_gcloud(
             ),
             order_by=core.build_order_by(args.get("sort", [])),
             include_iam=bool(args.get("include_iam")),
+            effective_iam=bool(args.get("effective")),
             billing_project=billing_project,
         )
     if capability.id == "grants":

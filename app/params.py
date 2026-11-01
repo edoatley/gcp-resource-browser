@@ -70,7 +70,12 @@ class Help:
     OUTPUT = "Output format"
     INCLUDE_IAM = (
         "Attach each resource's directly-attached IAM bindings. One extra call for the "
-        "whole scope. Inherited bindings are not included."
+        "whole scope. Inherited bindings are not included unless effective is also set."
+    )
+    EFFECTIVE_IAM = (
+        "With IAM included, also attach the bindings each resource inherits from its "
+        "ancestors, up to and including the scope, marked `inherited_from`. Grants made above "
+        "the scope are not visible. One extra call per 20 resources."
     )
     CACHE_TTL = (
         "Seconds to cache identical searches. 0 (the default) disables it -- an audit "
@@ -119,6 +124,8 @@ class SearchFilters:
     show_all: bool = False
     sort: Sequence[str] = field(default_factory=tuple)
     include_iam: bool = False
+    # Requires include_iam: rejected without it, never silently ignored.
+    effective_iam: bool = False
     cache_ttl: float = 0.0
 
 

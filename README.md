@@ -16,7 +16,8 @@ whole project, folder or organisation, with filters evaluated server-side.
 > Phase 10 hardens the 29 risk rules: a test and a live script check that every rule's
 > permission exists, and each new source quote was checked against its page. `--expand-members` shows who is behind
 > groups and project-role members; the `group:` path
-> awaits an estate with Cloud Identity groups ([`docs/todo/`](docs/todo/)). See the
+> awaits an estate with Cloud Identity groups ([`docs/todo/`](docs/todo/)). `--include-iam
+> --effective` adds inherited bindings up to the search scope, verified against gcloud. See the
 > [delivery plan](docs/DELIVERY_PLAN.md).
 
 ## Quickstart
@@ -144,7 +145,8 @@ uv run gcpe search $SCOPE --type serviceaccount -o json | jq -r '.[].display_nam
 ```
 
 **6. See who has access.** Add IAM bindings attached to each resource. Inherited grants are
-*not* included, and the output says so:
+*not* included unless you add `--effective`, and the output says which you got. Even with it,
+inheritance stops at the scope you searched:
 
 ```bash
 uv run gcpe search $SCOPE --type bucket --type cloudrun --type topic --include-iam -o json \

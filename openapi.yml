@@ -139,11 +139,28 @@ paths:
         schema:
           type: boolean
           description: Attach each resource's directly-attached IAM bindings. One
-            extra call for the whole scope. Inherited bindings are not included.
+            extra call for the whole scope. Inherited bindings are not included unless
+            effective is also set.
           default: false
           title: Include Iam
         description: Attach each resource's directly-attached IAM bindings. One extra
-          call for the whole scope. Inherited bindings are not included.
+          call for the whole scope. Inherited bindings are not included unless effective
+          is also set.
+      - name: effective
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: With IAM included, also attach the bindings each resource inherits
+            from its ancestors, up to and including the scope, marked `inherited_from`.
+            Grants made above the scope are not visible. One extra call per 20 resources.
+            Requires include_iam=true.
+          default: false
+          title: Effective
+        description: With IAM included, also attach the bindings each resource inherits
+          from its ancestors, up to and including the scope, marked `inherited_from`.
+          Grants made above the scope are not visible. One extra call per 20 resources.
+          Requires include_iam=true.
       - name: cache_ttl
         in: query
         required: false
@@ -1153,6 +1170,14 @@ components:
           type: array
           title: Members
           description: Principals granted the role
+        inherited_from:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Inherited From
+          description: Full resource name of the ancestor this binding is attached
+            to, when it is inherited rather than attached to the resource itself.
+            Only present when `effective` was requested.
       type: object
       required:
       - role
@@ -1266,8 +1291,9 @@ components:
           title: Iam Bindings
           description: IAM bindings ATTACHED to this resource, when include=iam was
             requested. None means IAM was not requested; an empty list means it was,
-            and none are attached. Inherited bindings are NOT included -- see `iam_note`
-            on the response envelope.
+            and none are attached. Inherited bindings are included only when `effective`
+            was requested, and then carry `inherited_from` -- see `iam_note` on the
+            response envelope.
       type: object
       required:
       - full_name
@@ -1320,6 +1346,16 @@ components:
           description: Present when IAM was requested. States the semantics of what
             was returned, since attached-only bindings are easy to mistake for effective
             access.
+        iam_errors:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Iam Errors
+          description: 'Present when `effective` was requested: resource -> why its
+            inherited bindings could not be read. Those resources show attached bindings
+            only. Empty means every resource was read.'
         data:
           items:
             $ref: '#/components/schemas/Resource'

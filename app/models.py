@@ -15,6 +15,17 @@ class IamBinding(BaseModel):
 
     role: str = Field(description="IAM role, e.g. roles/storage.admin")
     members: list[str] = Field(description="Principals granted the role")
+    # Omitted from output when None, so a response without `effective` is
+    # byte-identical to one from before the field existed.
+    inherited_from: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Full resource name of the ancestor this binding is attached to, when it is "
+            "inherited rather than attached to the resource itself. Only present when "
+            "`effective` was requested."
+        ),
+    )
 
 
 class Resource(BaseModel):
@@ -52,8 +63,8 @@ class Resource(BaseModel):
         description=(
             "IAM bindings ATTACHED to this resource, when include=iam was requested. "
             "None means IAM was not requested; an empty list means it was, and none are "
-            "attached. Inherited bindings are NOT included -- see `iam_note` on the "
-            "response envelope."
+            "attached. Inherited bindings are included only when `effective` was requested, "
+            "and then carry `inherited_from` -- see `iam_note` on the response envelope."
         ),
     )
 
@@ -88,6 +99,15 @@ class ResourceList(BaseModel):
         description=(
             "Present when IAM was requested. States the semantics of what was returned, "
             "since attached-only bindings are easy to mistake for effective access."
+        ),
+    )
+    iam_errors: dict[str, str] | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Present when `effective` was requested: resource -> why its inherited bindings "
+            "could not be read. Those resources show attached bindings only. Empty means "
+            "every resource was read."
         ),
     )
     data: list[Resource]

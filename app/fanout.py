@@ -51,6 +51,9 @@ class FanoutResult:
     # are named: silently omitting a scope the caller asked for would
     # under-report the estate, the failure this tool exists to prevent.
     failures: dict[str, str] = field(default_factory=dict)
+    # None unless effective IAM was requested; resource -> why its inherited
+    # bindings could not be read, across every scope.
+    iam_errors: dict[str, str] | None = None
 
     @property
     def summary(self) -> str:
@@ -103,6 +106,8 @@ def search_scopes(
             merged.query = merged.query or result.query
             merged.asset_types = merged.asset_types or result.asset_types
             merged.iam_note = merged.iam_note or result.iam_note
+            if result.iam_errors is not None:
+                merged.iam_errors = {**(merged.iam_errors or {}), **result.iam_errors}
 
     # as_completed yields in completion order, which varies run to run. Sort so
     # output is reproducible and diffable.

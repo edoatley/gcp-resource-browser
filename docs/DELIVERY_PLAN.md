@@ -392,9 +392,23 @@ omitting data would misrepresent the resource.
   surfaced in `iam_note`, so adding the mode later is additive rather than a correction.
   *Update, 2026-10:* bounded fan-out now exists, so the prerequisite is met. A review of the
   risk feature found this to be its largest remaining gap: a project-scoped `grants` search
-  cannot see folder or organization grants. Written up in
-  [`docs/todo/effective-iam.md`](todo/effective-iam.md). Only partly verifiable on this
-  estate, which has no organization.
+  cannot see folder or organization grants.
+  - ☑ **Inherited bindings on resources** (`--include-iam --effective` / `?effective=true`).
+    Names are batched by 20, with at most 8 calls in flight. A batch that 404s on one unknown
+    name is retried one name per call. Unreadable resources go in `iam_errors` (CLI exit 7).
+    **Verified live** on 2026-10-18: `scripts/compare-effective-iam.sh` MATCHes gcloud for
+    buckets in `idp-prototype-edo` (8 bindings, each bucket inheriting the project's policy) and
+    for every type in `idp-prototype-edo` (28 resources) and `gcp-sandbox-2026-18798`
+    (133 resources, 3,902 lines, including the two workload identity pools CAI cannot resolve).
+    Default output was diffed against `main` on live data and is unchanged apart from label
+    order, which CAI does not fix.
+  - ☐ **Grants made above the scope.** Not possible through effective IAM. The API returns
+    ancestors only "up to the scope", so a project-scoped call never reaches the folder or
+    organization. The original plan would have reported "none inherited" on this estate and
+    looked verified. Options, and the recommended next step (name the ancestors via
+    `projects.getAncestry`), are in [`docs/todo/grants-above-scope.md`](todo/grants-above-scope.md).
+  - ☐ **Conditions on resource bindings**, attached or inherited:
+    [`docs/todo/iam-binding-conditions.md`](todo/iam-binding-conditions.md).
 - **Non-CAI enrichment** stays gated, per the rule below.
 
 ---

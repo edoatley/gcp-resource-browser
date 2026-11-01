@@ -53,7 +53,10 @@ def fakes(monkeypatch):
             ),
         },
     )
-    monkeypatch.setattr(core, "get_client", lambda: FakeAssetClient([make_search_result()]))
+    bucket = make_search_result()
+    project = "//cloudresourcemanager.googleapis.com/projects/p"
+    effective = {bucket.name: [(project, {"roles/owner": ("user:a@example.com",)})]}
+    monkeypatch.setattr(core, "get_client", lambda: FakeAssetClient([bucket], effective=effective))
     monkeypatch.setattr(core, "get_rest_session", lambda: session)
     monkeypatch.setattr(core, "adc_quota_project", lambda: None)
     yield
